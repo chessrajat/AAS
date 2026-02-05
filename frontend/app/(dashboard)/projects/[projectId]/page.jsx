@@ -49,6 +49,7 @@ export default function ProjectAnnotatePage() {
     updateAnnotation,
     deleteAnnotation,
     createProjectClass,
+    exportProject,
   } = useApiStore();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -80,6 +81,8 @@ export default function ProjectAnnotatePage() {
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
   const [newLabelIndex, setNewLabelIndex] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const [imageMeta, setImageMeta] = useState({
     naturalWidth: 0,
     naturalHeight: 0,
@@ -247,6 +250,16 @@ export default function ProjectAnnotatePage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deleteAnnotation, selectedAnnotationId]);
+
+  useEffect(() => {
+    if (!selectedAnnotationId) {
+      return;
+    }
+    const selected = getAnnotationById(selectedAnnotationId);
+    if (selected) {
+      setActiveLabelId(selected.project_class);
+    }
+  }, [selectedAnnotationId, annotations]);
 
   useEffect(() => {
     panOffsetRef.current = panOffset;
@@ -442,6 +455,32 @@ export default function ProjectAnnotatePage() {
 
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(maxZoom, Number((prev + zoomStep).toFixed(2))));
+  };
+
+  const handleExportProject = async () => {
+    if (!params?.projectId) {
+      return;
+    }
+    setIsExporting(true);
+    setExportProgress(0);
+    const result = await exportProject(params.projectId, setExportProgress);
+    if (!result.ok) {
+      toast.error("Export failed", {
+        description: result.error || "Please try again.",
+      });
+      setIsExporting(false);
+      return;
+    }
+
+    const blobUrl = window.URL.createObjectURL(result.data);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `project-${params.projectId}-yolov8.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+    setIsExporting(false);
   };
 
   const openLabelDialog = () => {
@@ -863,7 +902,17 @@ export default function ProjectAnnotatePage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900">
+    <div className="relative flex h-screen overflow-hidden bg-slate-50 text-slate-900">
+      {isExporting ? (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
+          <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
+            <p className="text-sm font-semibold text-slate-900">Exporting dataset</p>
+            <p className="mt-2 text-xs text-slate-500">
+              {exportProgress ? `${exportProgress}%` : "Preparing download..."}
+            </p>
+          </div>
+        </div>
+      ) : null}
       <aside className="hidden w-16 flex-col items-center gap-3 border-r border-slate-200 bg-white py-4 md:flex">
         <Link
           href="/"
@@ -929,7 +978,7 @@ export default function ProjectAnnotatePage() {
         <div className="flex flex-col items-center gap-2" />
       </aside>
 
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
           <div className="flex items-center gap-3">
             <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
@@ -958,7 +1007,9 @@ export default function ProjectAnnotatePage() {
               {isUploading ? "Uploading..." : "Upload images"}
             </Button>
             <Button variant="secondary">Auto annotate</Button>
-            <Button>Save</Button>
+            <Button variant="outline" onClick={handleExportProject} disabled={isExporting}>
+              {isExporting ? "Exporting..." : "Export dataset"}
+            </Button>
           </div>
         </header>
 
@@ -1065,14 +1116,14 @@ export default function ProjectAnnotatePage() {
             </div>
           </div>
 
-          <aside className="w-full max-w-sm border-l border-slate-200 bg-white">
-            <Tabs defaultValue="objects" className="h-full">
+          <aside className="flex h-full w-full max-w-sm min-h-0 flex-col border-l border-slate-200 bg-white pb-10">
+            <Tabs defaultValue="objects" className="flex h-full min-h-0 flex-col">
               <TabsList className="grid w-full grid-cols-2 rounded-none bg-slate-100">
                 <TabsTrigger value="objects">Objects</TabsTrigger>
                 <TabsTrigger value="labels">Labels</TabsTrigger>
               </TabsList>
-              <TabsContent value="objects" className="h-full">
-                <div className="flex h-full flex-col">
+              <TabsContent value="objects" className="flex-1 min-h-0 overflow-hidden">
+                <div className="flex h-full min-h-0 flex-col">
                   <div className="space-y-3 border-b border-slate-200 p-4">
                     <Input placeholder="Search frames or IDs" className="bg-white" />
                     <div className="flex items-center gap-2">
@@ -1080,7 +1131,7 @@ export default function ProjectAnnotatePage() {
                       <Badge variant="outline">0 pending</Badge>
                     </div>
                   </div>
-                  <ScrollArea className="flex-1">
+                  <ScrollArea className="flex-1 min-h-0">
                     <div className="space-y-3 p-4">
                       {annotations.length === 0 ? (
                         <Card className="border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
@@ -1158,8 +1209,8 @@ export default function ProjectAnnotatePage() {
                   </ScrollArea>
                 </div>
               </TabsContent>
-              <TabsContent value="labels" className="h-full">
-                <div className="flex h-full flex-col">
+              <TabsContent value="labels" className="flex-1 min-h-0 overflow-hidden">
+                <div className="flex h-full min-h-0 flex-col">
                   <div className="border-b border-slate-200 p-4">
                     <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
                       Label set
@@ -1173,7 +1224,7 @@ export default function ProjectAnnotatePage() {
                       </Button>
                     </div>
                   </div>
-                  <ScrollArea className="flex-1">
+                  <ScrollArea className="flex-1 min-h-0">
                     <div className="space-y-3 p-4">
                       {!hasLabels ? (
                         <Card className="border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
@@ -1192,13 +1243,79 @@ export default function ProjectAnnotatePage() {
                                   ? "ring-2 ring-slate-900 ring-offset-1"
                                   : ""
                               }`}
-                              onClick={() => setActiveLabelId(label.id)}
+                              onClick={async () => {
+                                if (activeTool === "select" && selectedAnnotationId) {
+                                  const selected = getAnnotationById(selectedAnnotationId);
+                                  if (!selected) {
+                                    return;
+                                  }
+                                  const payload = {
+                                    project_class: label.id,
+                                    x_min: selected.x_min,
+                                    y_min: selected.y_min,
+                                    x_max: selected.x_max,
+                                    y_max: selected.y_max,
+                                  };
+                                  const result = await updateAnnotation(
+                                    selectedAnnotationId,
+                                    payload,
+                                  );
+                                  if (!result.ok) {
+                                    toast.error("Update failed", {
+                                      description: result.error || "Please try again.",
+                                    });
+                                    return;
+                                  }
+                                  setAnnotations((prev) =>
+                                    prev.map((annotation) =>
+                                      annotation.id === selectedAnnotationId
+                                        ? { ...annotation, project_class: label.id }
+                                        : annotation,
+                                    ),
+                                  );
+                                  return;
+                                }
+                                setActiveLabelId(label.id);
+                              }}
                               role="button"
                               tabIndex={0}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  setActiveLabelId(label.id);
+                              onKeyDown={async (event) => {
+                                if (event.key !== "Enter" && event.key !== " ") {
+                                  return;
                                 }
+                                event.preventDefault();
+                                if (activeTool === "select" && selectedAnnotationId) {
+                                  const selected = getAnnotationById(selectedAnnotationId);
+                                  if (!selected) {
+                                    return;
+                                  }
+                                  const payload = {
+                                    project_class: label.id,
+                                    x_min: selected.x_min,
+                                    y_min: selected.y_min,
+                                    x_max: selected.x_max,
+                                    y_max: selected.y_max,
+                                  };
+                                  const result = await updateAnnotation(
+                                    selectedAnnotationId,
+                                    payload,
+                                  );
+                                  if (!result.ok) {
+                                    toast.error("Update failed", {
+                                      description: result.error || "Please try again.",
+                                    });
+                                    return;
+                                  }
+                                  setAnnotations((prev) =>
+                                    prev.map((annotation) =>
+                                      annotation.id === selectedAnnotationId
+                                        ? { ...annotation, project_class: label.id }
+                                        : annotation,
+                                    ),
+                                  );
+                                  return;
+                                }
+                                setActiveLabelId(label.id);
                               }}
                             >
                               <div className="flex items-center justify-between">

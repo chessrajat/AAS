@@ -50,32 +50,6 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
-  updateProject: async (projectId, payload) => {
-    set({ error: null });
-    if (!projectId) {
-      return { ok: false, error: "Missing project id" };
-    }
-    try {
-      const response = await apiClient.patch(
-        `/api/annotate/projects/${projectId}/`,
-        payload,
-      );
-      const data = response.data;
-      set((state) => ({
-        projects: state.projects.map((project) =>
-          project.id === data.id ? data : project,
-        ),
-      }));
-      return { ok: true, data };
-    } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to update project");
-      set({ error: message });
-      return { ok: false, error: message };
-    }
-  },
   createProjectClass: async (projectId, payload) => {
     set({ error: null });
     if (!projectId) {
@@ -264,6 +238,35 @@ export const useApiStore = create((set) => ({
         error?.response?.data?.detail ||
         error?.response?.data?.error ||
         (error instanceof Error ? error.message : "Unable to delete annotation");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  exportProject: async (projectId, onProgress) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/projects/${projectId}/export/`,
+        {
+          responseType: "blob",
+          onDownloadProgress: (event) => {
+            if (!onProgress || !event.total) {
+              return;
+            }
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          },
+        },
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to export project");
       set({ error: message });
       return { ok: false, error: message };
     }
