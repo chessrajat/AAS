@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FolderKanban, LayoutGrid, Plus, Trash2 } from "lucide-react";
+import { FolderKanban, LayoutGrid, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useAuthStore } from "./stores/authStore";
 import { useApiStore } from "./stores/apiStore";
@@ -28,12 +28,29 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function Home() {
   const router = useRouter();
   const accessToken = useAuthStore((state) => state.accessToken);
   const {
     createProject,
+    deleteProject,
     fetchProjects,
     isCreatingProject,
     isLoadingProjects,
@@ -45,6 +62,8 @@ export default function Home() {
   const [projectClasses, setProjectClasses] = useState([
     { name: "", index: 0, color: "#3b82f6" },
   ]);
+  const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState(null);
 
   const resetProjectForm = () => {
     setProjectName("");
@@ -123,6 +142,29 @@ export default function Home() {
     });
     setIsProjectModalOpen(false);
     resetProjectForm();
+  };
+
+  const handleOpenDeleteProject = (project) => {
+    setProjectToDelete(project);
+    setIsDeleteProjectOpen(true);
+  };
+
+  const handleConfirmDeleteProject = async () => {
+    if (!projectToDelete) {
+      return;
+    }
+    const result = await deleteProject(projectToDelete.id);
+    if (!result.ok) {
+      toast.error("Delete failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    toast.success("Project deleted", {
+      description: projectToDelete.name || "Project removed.",
+    });
+    setIsDeleteProjectOpen(false);
+    setProjectToDelete(null);
   };
 
   return (
@@ -296,25 +338,77 @@ export default function Home() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {projects.map((project) => (
-                <Link key={project.id} href={`/projects/${project.id}`}>
-                  <Card className="border-slate-200/70 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
-                    <div className="space-y-2">
-                      <h2 className="text-lg font-semibold text-slate-900">
-                        {project.name}
-                      </h2>
-                      <p className="text-sm text-slate-500">
-                        {project.description || "No description"}
-                      </p>
-                      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                        {project.classes?.length || 0} classes
-                      </p>
-                    </div>
-                  </Card>
-                </Link>
+                <div key={project.id} className="relative">
+                  <Link href={`/projects/${project.id}`} className="block">
+                    <Card className="border-slate-200/70 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
+                      <div className="space-y-2">
+                        <h2 className="text-lg font-semibold text-slate-900">
+                          {project.name}
+                        </h2>
+                        <p className="text-sm text-slate-500">
+                          {project.description || "No description"}
+                        </p>
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                          {project.classes?.length || 0} classes
+                        </p>
+                      </div>
+                    </Card>
+                  </Link>
+                  <div className="absolute right-3 top-3">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-slate-500 hover:text-slate-900"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleOpenDeleteProject(project);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete project
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
               ))}
             </div>
           )}
         </div>
+        <AlertDialog
+          open={isDeleteProjectOpen}
+          onOpenChange={(open) => {
+            setIsDeleteProjectOpen(open);
+            if (!open) {
+              setProjectToDelete(null);
+            }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete project?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Deleting a project will remove its images, labels, and annotations.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmDeleteProject}>
+                Confirm delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SidebarInset>
     </SidebarProvider>
   );

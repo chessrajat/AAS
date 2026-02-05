@@ -30,7 +30,7 @@ class ProjectClass(models.Model):
 def project_image_upload_to(instance, filename):
     ext = filename.split('.')[-1] if '.' in filename else ''
     name = f"{uuid.uuid4()}.{ext}" if ext else f"{uuid.uuid4()}"
-    return f"images/{name}"
+    return f"projects/{instance.project_id}/images/{name}"
 
 
 class Image(models.Model):
@@ -55,7 +55,7 @@ class Image(models.Model):
 
 class Annotation(models.Model):
     image = models.ForeignKey(Image, on_delete=models.CASCADE, related_name='annotations')
-    project_class = models.ForeignKey(ProjectClass, on_delete=models.PROTECT, related_name='annotations')
+    project_class = models.ForeignKey(ProjectClass, on_delete=models.CASCADE, related_name='annotations')
     x_min = models.PositiveIntegerField()
     y_min = models.PositiveIntegerField()
     x_max = models.PositiveIntegerField()

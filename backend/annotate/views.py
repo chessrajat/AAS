@@ -118,7 +118,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return response
 
 
-class ImageViewSet(viewsets.GenericViewSet):
+class ImageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
     queryset = Image.objects.select_related('project').all()
     serializer_class = ImageSerializer
     permission_classes = [IsAuthenticated]
@@ -144,6 +144,11 @@ class ImageViewSet(viewsets.GenericViewSet):
             AnnotationSerializer(annotation).data,
             status=status.HTTP_201_CREATED,
         )
+
+    def destroy(self, request, *args, **kwargs):
+        image = self.get_object()
+        Annotation.objects.filter(image=image).delete()
+        return super().destroy(request, *args, **kwargs)
 
 
 class AnnotationViewSet(

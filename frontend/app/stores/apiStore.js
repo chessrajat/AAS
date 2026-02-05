@@ -271,4 +271,41 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  deleteImage: async (imageId) => {
+    set({ error: null });
+    if (!imageId) {
+      return { ok: false, error: "Missing image id" };
+    }
+    try {
+      await apiClient.delete(`/api/annotate/images/${imageId}/`);
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to delete image");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteProject: async (projectId) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      await apiClient.delete(`/api/annotate/projects/${projectId}/`);
+      set((state) => ({
+        projects: state.projects.filter((project) => project.id !== projectId),
+      }));
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to delete project");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
 }));

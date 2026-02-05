@@ -11,6 +11,7 @@ import {
   Minus,
   Plus,
   Square,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useAuthStore } from "../../../stores/authStore";
@@ -35,6 +36,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function ProjectAnnotatePage() {
   const router = useRouter();
@@ -50,6 +61,8 @@ export default function ProjectAnnotatePage() {
     deleteAnnotation,
     createProjectClass,
     exportProject,
+    deleteProjectClass,
+    deleteImage,
   } = useApiStore();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -83,6 +96,10 @@ export default function ProjectAnnotatePage() {
   const [newLabelIndex, setNewLabelIndex] = useState("");
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [isDeleteLabelOpen, setIsDeleteLabelOpen] = useState(false);
+  const [labelToDelete, setLabelToDelete] = useState(null);
+  const [isDeleteImageOpen, setIsDeleteImageOpen] = useState(false);
+  const [imageToDelete, setImageToDelete] = useState(null);
   const [imageMeta, setImageMeta] = useState({
     naturalWidth: 0,
     naturalHeight: 0,
@@ -436,6 +453,10 @@ export default function ProjectAnnotatePage() {
     const nextImages = result.data || [];
     setImages(nextImages);
     setActiveIndex(0);
+    const refreshed = await fetchProjectImages(params?.projectId);
+    if (refreshed.ok) {
+      setImages(refreshed.data || []);
+    }
     toast.success("Images uploaded", {
       description: `${files.length} image(s) added to the project.`,
     });
@@ -481,6 +502,78 @@ export default function ProjectAnnotatePage() {
     link.remove();
     window.URL.revokeObjectURL(blobUrl);
     setIsExporting(false);
+  };
+
+  const handleOpenDeleteLabel = (label) => {
+    setLabelToDelete(label);
+    setIsDeleteLabelOpen(true);
+  };
+
+  const handleConfirmDeleteLabel = async () => {
+    if (!labelToDelete) {
+      return;
+    }
+    const result = await deleteProjectClass(labelToDelete.id);
+    if (!result.ok) {
+      toast.error("Delete failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+
+    setProject((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      const nextClasses = (prev.classes || []).filter(
+        (label) => label.id !== labelToDelete.id,
+      );
+      if (activeLabelId === labelToDelete.id) {
+        setActiveLabelId(nextClasses[0]?.id || null);
+      }
+      return {
+        ...prev,
+        classes: nextClasses,
+      };
+    });
+    setAnnotations((prev) =>
+      prev.filter((annotation) => annotation.project_class !== labelToDelete.id),
+    );
+    if (selectedAnnotationId) {
+      const selected = getAnnotationById(selectedAnnotationId);
+      if (selected?.project_class === labelToDelete.id) {
+        setSelectedAnnotationId(null);
+      }
+    }
+    setIsDeleteLabelOpen(false);
+    setLabelToDelete(null);
+  };
+
+  const handleOpenDeleteImage = (image) => {
+    setImageToDelete(image);
+    setIsDeleteImageOpen(true);
+  };
+
+  const handleConfirmDeleteImage = async () => {
+    if (!imageToDelete) {
+      return;
+    }
+    const result = await deleteImage(imageToDelete.id);
+    if (!result.ok) {
+      toast.error("Delete failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    setImages((prev) => {
+      const nextImages = prev.filter((image) => image.id !== imageToDelete.id);
+      const nextIndex = Math.min(activeIndex, Math.max(nextImages.length - 1, 0));
+      setActiveIndex(nextIndex);
+      return nextImages;
+    });
+    setAnnotations([]);
+    setIsDeleteImageOpen(false);
+    setImageToDelete(null);
   };
 
   const openLabelDialog = () => {
@@ -1034,9 +1127,21 @@ export default function ProjectAnnotatePage() {
               </Button>
               <div className="ml-2 flex items-center gap-2">
                 <Badge variant="secondary">
-                  {hasImages ? `Image ${activeIndex + 1}` : "No images"}
+                  {hasImages
+                    ? `Image ${activeIndex + 1}/${images.length}`
+                    : "No images"}
                 </Badge>
                 <span>{imageName}</span>
+                {hasImages ? (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-red-500 hover:text-red-600"
+                    onClick={() => handleOpenDeleteImage(activeImage)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ) : null}
               </div>
               <div className="ml-auto flex items-center gap-2">
                 <Button
@@ -1328,9 +1433,22 @@ export default function ProjectAnnotatePage() {
                                     {label.name}
                                   </span>
                                 </div>
-                                <span className="text-xs text-slate-400">
-                                  Index {label.index}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-slate-400">
+                                    Index {label.index}
+                                  </span>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-7 w-7 text-red-500 hover:text-red-600"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleOpenDeleteLabel(label);
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
                               <p className="mt-2 text-xs text-slate-500">
                                 Tap to assign to selected box.
@@ -1398,6 +1516,54 @@ export default function ProjectAnnotatePage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            <AlertDialog
+              open={isDeleteLabelOpen}
+              onOpenChange={(open) => {
+                setIsDeleteLabelOpen(open);
+                if (!open) {
+                  setLabelToDelete(null);
+                }
+              }}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete label?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Deleting a label will delete all annotations associated with it.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleConfirmDeleteLabel}>
+                    Confirm delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <AlertDialog
+              open={isDeleteImageOpen}
+              onOpenChange={(open) => {
+                setIsDeleteImageOpen(open);
+                if (!open) {
+                  setImageToDelete(null);
+                }
+              }}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete image?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Deleting this image will remove all annotations linked to it.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleConfirmDeleteImage}>
+                    Confirm delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </aside>
         </div>
       </div>

@@ -15,6 +15,7 @@ router.register('classes', ProjectClassViewSet, basename='project-class')
 # - /api/annotate/projects/{id}/classes/ [POST]
 # - /api/annotate/projects/{id}/export/ [GET]
 # - /api/annotate/images/{id}/annotations/ [GET, POST]
+# - /api/annotate/images/{id}/ [DELETE]
 # - /api/annotate/annotations/{id}/ [PATCH, DELETE]
 # - /api/annotate/classes/{id}/ [DELETE]
 urlpatterns = router.urls

@@ -1,3 +1,4 @@
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
 from .models import Annotation, Image, Project, ProjectClass
@@ -16,11 +17,26 @@ class ProjectSerializer(serializers.ModelSerializer):
         model = Project
         fields = ('id', 'name', 'description', 'classes')
 
+    def validate_classes(self, value):
+        names = [item.get('name') for item in value if item.get('name') is not None]
+        indices = [item.get('index') for item in value if item.get('index') is not None]
+        if len(names) != len(set(names)):
+            raise serializers.ValidationError("Class names must be unique.")
+        if len(indices) != len(set(indices)):
+            raise serializers.ValidationError("Class indices must be unique.")
+        return value
+
     def create(self, validated_data):
         classes_data = validated_data.pop('classes', [])
-        project = Project.objects.create(**validated_data)
-        for class_data in classes_data:
-            ProjectClass.objects.create(project=project, **class_data)
+        try:
+            with transaction.atomic():
+                project = Project.objects.create(**validated_data)
+                for class_data in classes_data:
+                    ProjectClass.objects.create(project=project, **class_data)
+        except IntegrityError:
+            raise serializers.ValidationError(
+                "Class names and indices must be unique within a project."
+            )
         return project
 
     def update(self, instance, validated_data):
