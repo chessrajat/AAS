@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 
 
@@ -25,6 +27,12 @@ class ProjectClass(models.Model):
         return f'{self.project.name}: {self.name}'
 
 
+def project_image_upload_to(instance, filename):
+    ext = filename.split('.')[-1] if '.' in filename else ''
+    name = f"{uuid.uuid4()}.{ext}" if ext else f"{uuid.uuid4()}"
+    return f"images/{name}"
+
+
 class Image(models.Model):
     STATUS_NEW = 'new'
     STATUS_IN_PROGRESS = 'in_progress'
@@ -36,7 +44,7 @@ class Image(models.Model):
     ]
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='images')
-    file = models.ImageField(upload_to='images/')
+    file = models.ImageField(upload_to=project_image_upload_to)
     width = models.PositiveIntegerField()
     height = models.PositiveIntegerField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Project, ProjectClass
+from .models import Image, Project, ProjectClass
 
 
 class ProjectClassSerializer(serializers.ModelSerializer):
@@ -35,3 +35,19 @@ class ProjectSerializer(serializers.ModelSerializer):
                 ProjectClass.objects.create(project=instance, **class_data)
 
         return instance
+
+
+class ImageSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Image
+        fields = ('id', 'file', 'file_url', 'width', 'height', 'status')
+
+    def get_file_url(self, obj):
+        request = self.context.get('request')
+        if not obj.file:
+            return None
+        if request is None:
+            return obj.file.url
+        return request.build_absolute_uri(obj.file.url)

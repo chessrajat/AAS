@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FolderKanban, LayoutGrid, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useAuthStore } from "./stores/authStore";
 import { useApiStore } from "./stores/apiStore";
 import { toast } from "sonner";
@@ -295,22 +296,21 @@ export default function Home() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {projects.map((project) => (
-                <Card
-                  key={project.id}
-                  className="border-slate-200/70 bg-white p-5 shadow-sm"
-                >
-                  <div className="space-y-2">
-                    <h2 className="text-lg font-semibold text-slate-900">
-                      {project.name}
-                    </h2>
-                    <p className="text-sm text-slate-500">
-                      {project.description || "No description"}
-                    </p>
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                      {project.classes?.length || 0} classes
-                    </p>
-                  </div>
-                </Card>
+                <Link key={project.id} href={`/projects/${project.id}`}>
+                  <Card className="border-slate-200/70 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
+                    <div className="space-y-2">
+                      <h2 className="text-lg font-semibold text-slate-900">
+                        {project.name}
+                      </h2>
+                      <p className="text-sm text-slate-500">
+                        {project.description || "No description"}
+                      </p>
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                        {project.classes?.length || 0} classes
+                      </p>
+                    </div>
+                  </Card>
+                </Link>
               ))}
             </div>
           )}

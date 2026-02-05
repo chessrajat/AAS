@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { apiClient } from "./api";
+import { apiClient, uploadClient } from "./api";
 
 
 export const useApiStore = create((set) => ({
@@ -47,6 +47,58 @@ export const useApiStore = create((set) => ({
         error?.response?.data?.error ||
         (error instanceof Error ? error.message : "Unable to create project");
       set({ isCreatingProject: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadProjectImages: async (projectId, files) => {
+    set({ error: null });
+    if (!projectId || !files || files.length === 0) {
+      return { ok: false, error: "No images selected" };
+    }
+    try {
+      const formData = new FormData();
+      Array.from(files).forEach((file) => {
+        formData.append("images", file);
+      });
+
+      const response = await uploadClient.post(
+        `/api/annotate/projects/${projectId}/images/`,
+        formData,
+      );
+      const data = response.data;
+      set((state) => ({
+        projects: state.projects.map((project) =>
+          project.id === Number(projectId)
+            ? { ...project, images: data }
+            : project,
+        ),
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Upload failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchProjectImages: async (projectId) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/projects/${projectId}/images/`,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to load images");
+      set({ error: message });
       return { ok: false, error: message };
     }
   },

@@ -12,6 +12,10 @@ export const apiClient = axios.create({
   },
 });
 
+export const uploadClient = axios.create({
+  baseURL: apiBaseUrl,
+});
+
 const tokenStorageKey = "aas-auth";
 const refreshClient = axios.create({
   baseURL: apiBaseUrl,
@@ -174,3 +178,14 @@ apiClient.interceptors.response.use(
     }
   },
 );
+
+uploadClient.interceptors.request.use((config) => {
+  const { accessToken } = getStoredTokens();
+  if (accessToken) {
+    config.headers = {
+      ...config.headers,
+      Authorization: `Bearer ${accessToken}`,
+    };
+  }
+  return config;
+});
