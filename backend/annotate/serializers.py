@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Image, Project, ProjectClass
+from .models import Annotation, Image, Project, ProjectClass
 
 
 class ProjectClassSerializer(serializers.ModelSerializer):
@@ -51,3 +51,12 @@ class ImageSerializer(serializers.ModelSerializer):
         if request is None:
             return obj.file.url
         return request.build_absolute_uri(obj.file.url)
+
+
+class AnnotationSerializer(serializers.ModelSerializer):
+    image = serializers.PrimaryKeyRelatedField(read_only=True)
+    project_class = serializers.PrimaryKeyRelatedField(queryset=ProjectClass.objects.all())
+
+    class Meta:
+        model = Annotation
+        fields = ('id', 'image', 'project_class', 'x_min', 'y_min', 'x_max', 'y_max')

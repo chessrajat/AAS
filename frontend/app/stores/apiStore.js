@@ -50,6 +50,98 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  updateProject: async (projectId, payload) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.patch(
+        `/api/annotate/projects/${projectId}/`,
+        payload,
+      );
+      const data = response.data;
+      set((state) => ({
+        projects: state.projects.map((project) =>
+          project.id === data.id ? data : project,
+        ),
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to update project");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createProjectClass: async (projectId, payload) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/annotate/projects/${projectId}/classes/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to create label");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteProjectClass: async (classId) => {
+    set({ error: null });
+    if (!classId) {
+      return { ok: false, error: "Missing label id" };
+    }
+    try {
+      await apiClient.delete(`/api/annotate/classes/${classId}/`);
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to delete label");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchProject: async (projectId) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/annotate/projects/${projectId}/`);
+      const data = response.data;
+      set((state) => {
+        const existingIndex = state.projects.findIndex(
+          (project) => project.id === data.id,
+        );
+        if (existingIndex === -1) {
+          return { projects: [...state.projects, data] };
+        }
+        const nextProjects = [...state.projects];
+        nextProjects[existingIndex] = data;
+        return { projects: nextProjects };
+      });
+      return { ok: true, data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to load project");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
   uploadProjectImages: async (projectId, files) => {
     set({ error: null });
     if (!projectId || !files || files.length === 0) {
@@ -98,6 +190,80 @@ export const useApiStore = create((set) => ({
         error?.response?.data?.detail ||
         error?.response?.data?.error ||
         (error instanceof Error ? error.message : "Unable to load images");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchAnnotations: async (imageId) => {
+    set({ error: null });
+    if (!imageId) {
+      return { ok: false, error: "Missing image id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/annotate/images/${imageId}/annotations/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to load annotations");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createAnnotation: async (imageId, payload) => {
+    set({ error: null });
+    if (!imageId) {
+      return { ok: false, error: "Missing image id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/annotate/images/${imageId}/annotations/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to create annotation");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateAnnotation: async (annotationId, payload) => {
+    set({ error: null });
+    if (!annotationId) {
+      return { ok: false, error: "Missing annotation id" };
+    }
+    try {
+      const response = await apiClient.patch(
+        `/api/annotate/annotations/${annotationId}/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to update annotation");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteAnnotation: async (annotationId) => {
+    set({ error: null });
+    if (!annotationId) {
+      return { ok: false, error: "Missing annotation id" };
+    }
+    try {
+      await apiClient.delete(`/api/annotate/annotations/${annotationId}/`);
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to delete annotation");
       set({ error: message });
       return { ok: false, error: message };
     }
