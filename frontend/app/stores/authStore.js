@@ -11,7 +11,9 @@ export const useAuthStore = create()(
       accessToken: null,
       refreshToken: null,
       isLoading: false,
+      hasHydrated: false,
       error: null,
+      setHasHydrated: (value) => set({ hasHydrated: value }),
       login: async (username, password) => {
         set({ isLoading: true, error: null });
         try {
@@ -79,6 +81,9 @@ export const useAuthStore = create()(
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     },
   ),
 );

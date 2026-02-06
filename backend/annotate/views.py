@@ -12,8 +12,22 @@ import zipfile
 from django.db import IntegrityError
 from django.http import HttpResponse
 
-from .models import Annotation, Image, Project, ProjectClass
-from .serializers import AnnotationSerializer, ImageSerializer, ProjectClassSerializer, ProjectSerializer
+from .models import (
+    AIModel,
+    Annotation,
+    AutoAnnotateConfig,
+    Image,
+    Project,
+    ProjectClass,
+)
+from .serializers import (
+    AIModelSerializer,
+    AnnotationSerializer,
+    AutoAnnotateConfigSerializer,
+    ImageSerializer,
+    ProjectClassSerializer,
+    ProjectSerializer,
+)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -117,6 +131,71 @@ class ProjectViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="project-{project.id}-yolov8.zip"'
         return response
 
+    @action(detail=True, methods=['get', 'post'], url_path='auto-annotate/configs')
+    def auto_annotate_configs(self, request, pk=None):
+        project = self.get_object()
+        if request.method.lower() == 'get':
+            configs = (
+                project.auto_annotate_configs.select_related('model')
+                .prefetch_related('mappings', 'mappings__project_class')
+                .order_by('id')
+            )
+            serializer = AutoAnnotateConfigSerializer(
+                configs,
+                many=True,
+                context={'project': project},
+            )
+            return Response(serializer.data)
+
+        serializer = AutoAnnotateConfigSerializer(
+            data=request.data,
+            context={'project': project},
+        )
+        serializer.is_valid(raise_exception=True)
+        config = serializer.save()
+        return Response(
+            AutoAnnotateConfigSerializer(
+                config,
+                context={'project': project},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True,
+        methods=['put', 'patch', 'delete'],
+        url_path=r'auto-annotate/configs/(?P<config_id>[^/.]+)',
+    )
+    def auto_annotate_config_detail(self, request, pk=None, config_id=None):
+        project = self.get_object()
+        config = project.auto_annotate_configs.select_related('model').filter(
+            id=config_id
+        ).first()
+        if not config:
+            return Response(
+                {'detail': 'Auto-annotate config not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if request.method.lower() == 'delete':
+            config.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        serializer = AutoAnnotateConfigSerializer(
+            config,
+            data=request.data,
+            partial=request.method.lower() == 'patch',
+            context={'project': project},
+        )
+        serializer.is_valid(raise_exception=True)
+        config = serializer.save()
+        return Response(
+            AutoAnnotateConfigSerializer(
+                config,
+                context={'project': project},
+            ).data
+        )
+
 
 class ImageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
     queryset = Image.objects.select_related('project').all()
@@ -173,3 +252,9 @@ class ProjectClassViewSet(
         instance = self.get_object()
         Annotation.objects.filter(project_class=instance).delete()
         return super().destroy(request, *args, **kwargs)
+
+
+class AIModelViewSet(viewsets.ModelViewSet):
+    queryset = AIModel.objects.all().order_by('id')
+    serializer_class = AIModelSerializer
+    permission_classes = [IsAuthenticated]

@@ -1,28 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { FolderKanban, LayoutGrid, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useAuthStore } from "./stores/authStore";
 import { useApiStore } from "./stores/apiStore";
 import { toast } from "sonner";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarRail,
-  SidebarSeparator,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
+import HomeSidebar from "./components/HomeSidebar";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -46,7 +31,6 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export default function Home() {
-  const router = useRouter();
   const accessToken = useAuthStore((state) => state.accessToken);
   const {
     createProject,
@@ -73,20 +57,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!accessToken) {
-      router.replace("/login");
-    }
-  }, [accessToken, router]);
-
-  useEffect(() => {
-    if (!accessToken) {
       return;
     }
     fetchProjects(accessToken);
   }, [accessToken, fetchProjects]);
-
-  if (!accessToken) {
-    return null;
-  }
 
   const randomColor = () => {
     const channel = () => Math.floor(80 + Math.random() * 160);
@@ -169,31 +143,7 @@ export default function Home() {
 
   return (
     <SidebarProvider>
-      <Sidebar collapsible="icon">
-        <SidebarHeader className="gap-2 px-3 py-4">
-          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-            <LayoutGrid className="size-4 text-slate-900" />
-            AAS
-          </div>
-        </SidebarHeader>
-        <SidebarSeparator />
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton isActive>
-                    <FolderKanban />
-                    <span>Projects</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-      </Sidebar>
-      <SidebarRail />
+      <HomeSidebar />
       <SidebarInset>
         <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/80 px-6 py-4 backdrop-blur">
           <div className="flex items-center gap-3">

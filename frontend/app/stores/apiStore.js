@@ -6,8 +6,11 @@ import { apiClient, uploadClient } from "./api";
 
 export const useApiStore = create((set) => ({
   projects: [],
+  models: [],
   isLoadingProjects: false,
+  isLoadingModels: false,
   isCreatingProject: false,
+  isCreatingModel: false,
   error: null,
   clearError: () => set({ error: null }),
   fetchProjects: async (token) => {
@@ -25,6 +28,24 @@ export const useApiStore = create((set) => ({
         error?.response?.data?.error ||
         (error instanceof Error ? error.message : "Unable to load projects");
       set({ isLoadingProjects: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchModels: async (token) => {
+    set({ isLoadingModels: true, error: null });
+    try {
+      const response = await apiClient.get("/api/annotate/models/", {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const data = response.data;
+      set({ isLoadingModels: false, error: null, models: data });
+      return { ok: true, data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to load models");
+      set({ isLoadingModels: false, error: message });
       return { ok: false, error: message };
     }
   },
@@ -47,6 +68,40 @@ export const useApiStore = create((set) => ({
         error?.response?.data?.error ||
         (error instanceof Error ? error.message : "Unable to create project");
       set({ isCreatingProject: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createModel: async (payload, token) => {
+    set({ isCreatingModel: true, error: null });
+    try {
+      const formData = new FormData();
+      Object.entries(payload).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === "") {
+          return;
+        }
+        formData.append(key, value);
+      });
+
+      const response = await uploadClient.post(
+        "/api/annotate/models/",
+        formData,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
+      const data = response.data;
+      set((state) => ({
+        isCreatingModel: false,
+        error: null,
+        models: [data, ...state.models],
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to create model");
+      set({ isCreatingModel: false, error: message });
       return { ok: false, error: message };
     }
   },
@@ -304,6 +359,65 @@ export const useApiStore = create((set) => ({
         error?.response?.data?.detail ||
         error?.response?.data?.error ||
         (error instanceof Error ? error.message : "Unable to delete project");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchAutoAnnotateConfigs: async (projectId) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/projects/${projectId}/auto-annotate/configs/`,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to load configs");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createAutoAnnotateConfig: async (projectId, payload) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/annotate/projects/${projectId}/auto-annotate/configs/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to save config");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateAutoAnnotateConfig: async (projectId, configId, payload) => {
+    set({ error: null });
+    if (!projectId || !configId) {
+      return { ok: false, error: "Missing config id" };
+    }
+    try {
+      const response = await apiClient.put(
+        `/api/annotate/projects/${projectId}/auto-annotate/configs/${configId}/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Unable to update config");
       set({ error: message });
       return { ok: false, error: message };
     }

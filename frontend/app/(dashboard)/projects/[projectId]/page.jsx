@@ -10,6 +10,7 @@ import {
   Hand,
   Minus,
   Plus,
+  SlidersHorizontal,
   Square,
   Trash2,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
   Tooltip,
   TooltipContent,
@@ -63,6 +65,11 @@ export default function ProjectAnnotatePage() {
     exportProject,
     deleteProjectClass,
     deleteImage,
+    fetchAutoAnnotateConfigs,
+    fetchModels,
+    models,
+    createAutoAnnotateConfig,
+    updateAutoAnnotateConfig,
   } = useApiStore();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -90,6 +97,12 @@ export default function ProjectAnnotatePage() {
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [isLabelDialogOpen, setIsLabelDialogOpen] = useState(false);
+  const [isMappingDialogOpen, setIsMappingDialogOpen] = useState(false);
+  const [hasAutoAnnotateConfig, setHasAutoAnnotateConfig] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [classMappings, setClassMappings] = useState({});
+  const [autoAnnotateConfigs, setAutoAnnotateConfigs] = useState([]);
+  const [isSavingAutoAnnotate, setIsSavingAutoAnnotate] = useState(false);
   const [isSavingLabel, setIsSavingLabel] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
@@ -167,6 +180,93 @@ export default function ProjectAnnotatePage() {
       isMounted = false;
     };
   }, [accessToken, params?.projectId, fetchProject, activeLabelId]);
+
+  useEffect(() => {
+    if (!accessToken || !params?.projectId) {
+      return;
+    }
+    let isMounted = true;
+    const loadConfigs = async () => {
+      const result = await fetchAutoAnnotateConfigs(params.projectId);
+      if (!isMounted) {
+        return;
+      }
+      if (result.ok) {
+        setHasAutoAnnotateConfig((result.data || []).length > 0);
+        setAutoAnnotateConfigs(result.data || []);
+      }
+    };
+    loadConfigs();
+    return () => {
+      isMounted = false;
+    };
+  }, [accessToken, params?.projectId, fetchAutoAnnotateConfigs]);
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+    fetchModels(accessToken);
+  }, [accessToken, fetchModels]);
+
+  useEffect(() => {
+    if (!selectedModelId) {
+      setClassMappings({});
+      return;
+    }
+    const config = autoAnnotateConfigs.find(
+      (item) => String(item.model?.id) === selectedModelId,
+    );
+    if (!config) {
+      setClassMappings({});
+      return;
+    }
+    const nextMappings = {};
+    (config.mappings || []).forEach((mapping) => {
+      nextMappings[mapping.model_class] = String(mapping.project_class);
+    });
+    setClassMappings(nextMappings);
+  }, [selectedModelId, autoAnnotateConfigs]);
+
+  const handleSaveAutoAnnotate = async () => {
+    if (!selectedModelId) {
+      toast.error("Select a model to configure.");
+      return;
+    }
+    const mappings = Object.entries(classMappings)
+      .filter(([, value]) => value)
+      .map(([modelClass, projectClass]) => ({
+        model_class: Number(modelClass),
+        project_class: Number(projectClass),
+      }));
+    setIsSavingAutoAnnotate(true);
+    const existingConfig = autoAnnotateConfigs.find(
+      (item) => String(item.model?.id) === selectedModelId,
+    );
+    const payload = {
+      model_id: Number(selectedModelId),
+      mappings,
+    };
+    const result = existingConfig
+      ? await updateAutoAnnotateConfig(params.projectId, existingConfig.id, payload)
+      : await createAutoAnnotateConfig(params.projectId, payload);
+    setIsSavingAutoAnnotate(false);
+    if (!result.ok) {
+      toast.error("Save failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    const updatedConfigs = existingConfig
+      ? autoAnnotateConfigs.map((item) =>
+          item.id === result.data.id ? result.data : item,
+        )
+      : [result.data, ...autoAnnotateConfigs];
+    setAutoAnnotateConfigs(updatedConfigs);
+    setHasAutoAnnotateConfig(updatedConfigs.length > 0);
+    setIsMappingDialogOpen(false);
+    toast.success("Auto-annotate configuration saved.");
+  };
 
   useEffect(() => {
     if (!activeImage?.id) {
@@ -1066,9 +1166,26 @@ export default function ProjectAnnotatePage() {
               </TooltipTrigger>
               <TooltipContent side="right">Pan canvas</TooltipContent>
             </Tooltip>
+            <div className="h-px w-8 bg-slate-200" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => setIsMappingDialogOpen(true)}
+                  className={
+                    hasAutoAnnotateConfig
+                      ? "text-emerald-600 hover:text-emerald-700"
+                      : ""
+                  }
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Configure auto-annotate</TooltipContent>
+            </Tooltip>
           </div>
         </TooltipProvider>
-        <div className="flex flex-col items-center gap-2" />
       </aside>
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -1099,7 +1216,9 @@ export default function ProjectAnnotatePage() {
             <Button variant="outline" onClick={handleUploadClick} disabled={isUploading}>
               {isUploading ? "Uploading..." : "Upload images"}
             </Button>
-            <Button variant="secondary">Auto annotate</Button>
+            <Button variant="secondary" disabled={!hasAutoAnnotateConfig}>
+              Auto annotate
+            </Button>
             <Button variant="outline" onClick={handleExportProject} disabled={isExporting}>
               {isExporting ? "Exporting..." : "Export dataset"}
             </Button>
@@ -1512,6 +1631,106 @@ export default function ProjectAnnotatePage() {
                   </Button>
                   <Button onClick={handleSaveLabel} disabled={isSavingLabel}>
                     {isSavingLabel ? "Saving..." : "Save label"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            <Dialog open={isMappingDialogOpen} onOpenChange={setIsMappingDialogOpen}>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Configure auto-annotate</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700" htmlFor="model-select">
+                      Model
+                    </label>
+                    <NativeSelect
+                    id="model-select"
+                    className="w-full"
+                    value={selectedModelId}
+                    onChange={(event) => setSelectedModelId(event.target.value)}
+                  >
+                    <NativeSelectOption value="">Select a model</NativeSelectOption>
+                    {models.map((model) => (
+                      <NativeSelectOption key={model.id} value={String(model.id)}>
+                        {model.name}
+                      </NativeSelectOption>
+                    ))}
+                    </NativeSelect>
+                  </div>
+                  {!selectedModelId ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-500">
+                      Select a model to load its classes, then map each model class to a project
+                      class.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-slate-400">
+                        <span>Model classes</span>
+                        <span>Project classes</span>
+                      </div>
+                      {(models.find((model) => String(model.id) === selectedModelId)?.classes ||
+                        []
+                      ).length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-500">
+                          This model has no classes.
+                        </div>
+                      ) : (project?.classes || []).length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-4 text-sm text-slate-500">
+                          This project has no classes yet. Add labels first.
+                        </div>
+                      ) : (
+                        <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
+                          {(models.find(
+                            (model) => String(model.id) === selectedModelId,
+                          )?.classes || []).map((modelClass, index) => (
+                            <div
+                              key={`${selectedModelId}-class-${index}`}
+                              className="grid grid-cols-[1.2fr_1fr] items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3"
+                            >
+                              <div>
+                                <p className="text-sm font-medium text-slate-900">
+                                  {modelClass || `Class ${index}`}
+                                </p>
+                                <p className="text-xs text-slate-400">
+                                  Index {index}
+                                </p>
+                              </div>
+                              <NativeSelect
+                                value={classMappings[index] || ""}
+                                onChange={(event) =>
+                                  setClassMappings((prev) => ({
+                                    ...prev,
+                                    [index]: event.target.value,
+                                  }))
+                                }
+                              >
+                                <NativeSelectOption value="">
+                                  Ignore this class
+                                </NativeSelectOption>
+                                {(project?.classes || []).map((projectClass) => (
+                                  <NativeSelectOption
+                                    key={projectClass.id}
+                                    value={String(projectClass.id)}
+                                  >
+                                    {projectClass.name} (#{projectClass.index})
+                                  </NativeSelectOption>
+                                ))}
+                              </NativeSelect>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" onClick={() => setIsMappingDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveAutoAnnotate} disabled={isSavingAutoAnnotate}>
+                    {isSavingAutoAnnotate ? "Saving..." : "Save configuration"}
                   </Button>
                 </DialogFooter>
               </DialogContent>

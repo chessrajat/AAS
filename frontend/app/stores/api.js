@@ -1,6 +1,7 @@
 "use client";
 
 import axios from "axios";
+import { useAuthStore } from "./authStore";
 
 export const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -90,6 +91,11 @@ const clearStoredTokens = () => {
   }
 };
 
+const clearAuthState = () => {
+  useAuthStore.getState().logout();
+  clearStoredTokens();
+};
+
 const redirectToLogin = () => {
   if (typeof window !== "undefined") {
     window.location.href = "/login";
@@ -130,7 +136,7 @@ apiClient.interceptors.response.use(
 
     const { refreshToken } = getStoredTokens();
     if (!refreshToken) {
-      clearStoredTokens();
+      clearAuthState();
       redirectToLogin();
       return Promise.reject(error);
     }
@@ -170,7 +176,7 @@ apiClient.interceptors.response.use(
       return apiClient(originalRequest);
     } catch (refreshError) {
       processPending(null);
-      clearStoredTokens();
+      clearAuthState();
       redirectToLogin();
       return Promise.reject(refreshError);
     } finally {
