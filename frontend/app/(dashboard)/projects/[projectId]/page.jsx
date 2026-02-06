@@ -70,6 +70,7 @@ export default function ProjectAnnotatePage() {
     models,
     createAutoAnnotateConfig,
     updateAutoAnnotateConfig,
+    runAutoAnnotate,
   } = useApiStore();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -103,6 +104,7 @@ export default function ProjectAnnotatePage() {
   const [classMappings, setClassMappings] = useState({});
   const [autoAnnotateConfigs, setAutoAnnotateConfigs] = useState([]);
   const [isSavingAutoAnnotate, setIsSavingAutoAnnotate] = useState(false);
+  const [isAutoAnnotating, setIsAutoAnnotating] = useState(false);
   const [isSavingLabel, setIsSavingLabel] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
@@ -266,6 +268,30 @@ export default function ProjectAnnotatePage() {
     setHasAutoAnnotateConfig(updatedConfigs.length > 0);
     setIsMappingDialogOpen(false);
     toast.success("Auto-annotate configuration saved.");
+  };
+
+  const handleRunAutoAnnotate = async () => {
+    if (!params?.projectId) {
+      return;
+    }
+    setIsAutoAnnotating(true);
+    const result = await runAutoAnnotate(params.projectId);
+    setIsAutoAnnotating(false);
+    if (!result.ok) {
+      toast.error("Auto-annotate failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    toast.success("Auto-annotate complete", {
+      description: `${result.data?.annotations_created || 0} annotations created.`,
+    });
+    if (activeImage?.id) {
+      const annotationsResult = await fetchAnnotations(activeImage.id);
+      if (annotationsResult.ok) {
+        setAnnotations(annotationsResult.data || []);
+      }
+    }
   };
 
   useEffect(() => {
@@ -1106,6 +1132,16 @@ export default function ProjectAnnotatePage() {
           </div>
         </div>
       ) : null}
+      {isAutoAnnotating ? (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
+          <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
+            <p className="text-sm font-semibold text-slate-900">Auto-annotating</p>
+            <p className="mt-2 text-xs text-slate-500">
+              Running model on project images...
+            </p>
+          </div>
+        </div>
+      ) : null}
       <aside className="hidden w-16 flex-col items-center gap-3 border-r border-slate-200 bg-white py-4 md:flex">
         <Link
           href="/"
@@ -1216,7 +1252,11 @@ export default function ProjectAnnotatePage() {
             <Button variant="outline" onClick={handleUploadClick} disabled={isUploading}>
               {isUploading ? "Uploading..." : "Upload images"}
             </Button>
-            <Button variant="secondary" disabled={!hasAutoAnnotateConfig}>
+            <Button
+              variant="secondary"
+              disabled={!hasAutoAnnotateConfig || isAutoAnnotating}
+              onClick={handleRunAutoAnnotate}
+            >
               Auto annotate
             </Button>
             <Button variant="outline" onClick={handleExportProject} disabled={isExporting}>

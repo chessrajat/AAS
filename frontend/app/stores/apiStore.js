@@ -422,4 +422,24 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  runAutoAnnotate: async (projectId, payload) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/annotate/projects/${projectId}/auto-annotate/run/`,
+        payload || {},
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        (error instanceof Error ? error.message : "Auto-annotate failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
 }));

@@ -12,6 +12,7 @@ import zipfile
 from django.db import IntegrityError
 from django.http import HttpResponse
 
+from .annotate import AutoAnnotateError, get_auto_annotate_config, run_auto_annotation
 from .models import (
     AIModel,
     Annotation,
@@ -195,6 +196,30 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 context={'project': project},
             ).data
         )
+
+    @action(detail=True, methods=['post'], url_path='auto-annotate/run')
+    def auto_annotate_run(self, request, pk=None):
+        project = self.get_object()
+        model_id = request.data.get('model_id')
+        if isinstance(model_id, list):
+            model_id = model_id[0]
+        if model_id is not None:
+            try:
+                model_id = int(model_id)
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': 'Invalid model_id.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        try:
+            config = get_auto_annotate_config(project, model_id=model_id)
+            result = run_auto_annotation(project, config)
+        except AutoAnnotateError as exc:
+            return Response(
+                {'detail': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(result, status=status.HTTP_200_OK)
 
 
 class ImageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):

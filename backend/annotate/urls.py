@@ -17,6 +17,7 @@ router.register('models', AIModelViewSet, basename='ai-model')
 # - /api/annotate/projects/{id}/export/ [GET]
 # - /api/annotate/projects/{id}/auto-annotate/configs/ [GET, POST]
 # - /api/annotate/projects/{id}/auto-annotate/configs/{config_id}/ [PUT, PATCH, DELETE]
+# - /api/annotate/projects/{id}/auto-annotate/run/ [POST]
 # - /api/annotate/images/{id}/annotations/ [GET, POST]
 # - /api/annotate/images/{id}/ [DELETE]
 # - /api/annotate/annotations/{id}/ [PATCH, DELETE]
