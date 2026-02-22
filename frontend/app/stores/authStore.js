@@ -65,6 +65,23 @@ export const useAuthStore = create()(
           return false;
         }
       },
+      logoutWithApi: async () => {
+        const refreshToken = get().refreshToken;
+        try {
+          if (refreshToken) {
+            await apiClient.post("/api/auth/logout/", { refresh: refreshToken });
+          }
+        } catch {
+          // Always clear local auth state even if logout request fails.
+        } finally {
+          set({
+            accessToken: null,
+            refreshToken: null,
+            isLoading: false,
+            error: null,
+          });
+        }
+      },
       logout: () =>
         set({
           accessToken: null,

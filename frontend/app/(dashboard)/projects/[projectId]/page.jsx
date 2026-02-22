@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Crosshair,
-  FolderKanban,
   Hand,
   Minus,
   Plus,
@@ -15,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
+import HomeSidebar from "../../../components/HomeSidebar";
 import { useAuthStore } from "../../../stores/authStore";
 import { useApiStore } from "../../../stores/apiStore";
 import { toast } from "sonner";
@@ -48,6 +48,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function ProjectAnnotatePage() {
   const router = useRouter();
@@ -118,6 +119,7 @@ export default function ProjectAnnotatePage() {
   const [labelToDelete, setLabelToDelete] = useState(null);
   const [isDeleteImageOpen, setIsDeleteImageOpen] = useState(false);
   const [imageToDelete, setImageToDelete] = useState(null);
+  const [isShortcutsDialogOpen, setIsShortcutsDialogOpen] = useState(false);
   const [imageMeta, setImageMeta] = useState({
     naturalWidth: 0,
     naturalHeight: 0,
@@ -125,7 +127,7 @@ export default function ProjectAnnotatePage() {
     displayHeight: 0,
   });
   const minZoom = 0.5;
-  const maxZoom = 2;
+  const maxZoom = 3;
   const zoomStep = 0.05;
   const hasImages = images.length > 0;
   const activeImage = hasImages ? images[activeIndex] : null;
@@ -133,6 +135,14 @@ export default function ProjectAnnotatePage() {
   const projectLabels = project?.classes ?? [];
   const hasLabels = projectLabels.length > 0;
   const annotationCount = annotations.length;
+  const keyboardShortcuts = [
+    { key: "D", description: "Switch to Draw bounding box tool." },
+    { key: "S", description: "Switch to Select/Move tool." },
+    { key: "X", description: "Go to next image." },
+    { key: "Z", description: "Go to previous image." },
+    { key: "Space (hold)", description: "Temporarily switch to Pan tool." },
+    { key: "Delete", description: "Delete selected annotation." },
+  ];
 
   useEffect(() => {
     if (!accessToken) {
@@ -474,7 +484,9 @@ export default function ProjectAnnotatePage() {
     if (!selectedAnnotationId) {
       return;
     }
-    const selected = getAnnotationById(selectedAnnotationId);
+    const selected = annotations.find(
+      (annotation) => annotation.id === selectedAnnotationId,
+    );
     if (selected) {
       setActiveLabelId(selected.project_class);
     }
@@ -1225,112 +1237,35 @@ export default function ProjectAnnotatePage() {
   }
 
   return (
-    <div className="relative flex h-screen overflow-hidden bg-slate-50 text-slate-900">
-      {isExporting ? (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
-          <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
-            <p className="text-sm font-semibold text-slate-900">Exporting dataset</p>
-            <p className="mt-2 text-xs text-slate-500">
-              {exportProgress ? `${exportProgress}%` : "Preparing download..."}
-            </p>
-          </div>
-        </div>
-      ) : null}
-      {isAutoAnnotating ? (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
-          <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
-            <p className="text-sm font-semibold text-slate-900">Auto-annotating</p>
-            <p className="mt-2 text-xs text-slate-500">
-              Running model on project images...
-            </p>
-          </div>
-        </div>
-      ) : null}
-      <aside className="hidden w-16 flex-col items-center gap-3 border-r border-slate-200 bg-white py-4 md:flex">
-        <Link
-          href="/"
-          className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-slate-100 transition hover:bg-slate-800"
-        >
-          <FolderKanban className="h-5 w-5" />
-        </Link>
-        <TooltipProvider delayDuration={200}>
-          <div className="flex flex-1 flex-col items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant={activeTool === "draw" ? "secondary" : "ghost"}
-                  className={
-                    activeTool === "draw"
-                      ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
-                      : ""
-                  }
-                  onClick={() => setActiveTool("draw")}
-                >
-                  <Square className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Draw bounding box</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant={activeTool === "select" ? "secondary" : "ghost"}
-                  className={
-                    activeTool === "select"
-                      ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
-                      : ""
-                  }
-                  onClick={() => setActiveTool("select")}
-                >
-                  <Crosshair className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Select or move box</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant={activeTool === "pan" ? "secondary" : "ghost"}
-                  className={
-                    activeTool === "pan"
-                      ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
-                      : ""
-                  }
-                  onClick={() => setActiveTool("pan")}
-                >
-                  <Hand className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Pan canvas</TooltipContent>
-            </Tooltip>
-            <div className="h-px w-8 bg-slate-200" />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => setIsMappingDialogOpen(true)}
-                  className={
-                    hasAutoAnnotateConfig
-                      ? "text-emerald-600 hover:text-emerald-700"
-                      : ""
-                  }
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Configure auto-annotate</TooltipContent>
-            </Tooltip>
-          </div>
-        </TooltipProvider>
-      </aside>
+    <SidebarProvider>
+      <HomeSidebar />
+      <SidebarInset>
+        <div className="relative flex h-full flex-1 overflow-hidden bg-slate-50 text-slate-900">
+          {isExporting ? (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
+              <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
+                <p className="text-sm font-semibold text-slate-900">Exporting dataset</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  {exportProgress ? `${exportProgress}%` : "Preparing download..."}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {isAutoAnnotating ? (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
+              <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
+                <p className="text-sm font-semibold text-slate-900">Auto-annotating</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Running model on project images...
+                </p>
+              </div>
+            </div>
+          ) : null}
 
-      <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
           <div className="flex items-center gap-3">
+            <SidebarTrigger />
             <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
               Projects
             </Link>
@@ -1370,6 +1305,96 @@ export default function ProjectAnnotatePage() {
         </header>
 
         <div className="flex flex-1 overflow-hidden">
+          <aside className="hidden w-16 flex-col items-center gap-3 border-r border-slate-200 bg-white py-4 md:flex">
+            <TooltipProvider delayDuration={200}>
+              <div className="flex flex-1 flex-col items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant={activeTool === "draw" ? "secondary" : "ghost"}
+                      className={
+                        activeTool === "draw"
+                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
+                          : ""
+                      }
+                      onClick={() => setActiveTool("draw")}
+                    >
+                      <Square className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Draw bounding box</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant={activeTool === "select" ? "secondary" : "ghost"}
+                      className={
+                        activeTool === "select"
+                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
+                          : ""
+                      }
+                      onClick={() => setActiveTool("select")}
+                    >
+                      <Crosshair className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Select or move box</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant={activeTool === "pan" ? "secondary" : "ghost"}
+                      className={
+                        activeTool === "pan"
+                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
+                          : ""
+                      }
+                      onClick={() => setActiveTool("pan")}
+                    >
+                      <Hand className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Pan canvas</TooltipContent>
+                </Tooltip>
+                <div className="h-px w-8 bg-slate-200" />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setIsMappingDialogOpen(true)}
+                      className={
+                        hasAutoAnnotateConfig
+                          ? "text-emerald-600 hover:text-emerald-700"
+                          : ""
+                      }
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Configure auto-annotate</TooltipContent>
+                </Tooltip>
+                <div className="mt-auto">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => setIsShortcutsDialogOpen(true)}
+                        aria-label="Show keyboard shortcuts"
+                      >
+                        <span className="text-sm font-semibold leading-none">i</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Keyboard shortcuts</TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+            </TooltipProvider>
+          </aside>
           <div className="flex flex-1 flex-col bg-slate-100">
             <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-2 text-xs text-slate-500">
               <Button
@@ -1902,6 +1927,31 @@ export default function ProjectAnnotatePage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            <Dialog open={isShortcutsDialogOpen} onOpenChange={setIsShortcutsDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Keyboard shortcuts</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-2">
+                  {keyboardShortcuts.map((shortcut) => (
+                    <div
+                      key={shortcut.key}
+                      className="grid grid-cols-[auto_1fr] items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                    >
+                      <Badge variant="outline" className="font-mono">
+                        {shortcut.key}
+                      </Badge>
+                      <p className="text-sm text-slate-600">{shortcut.description}</p>
+                    </div>
+                  ))}
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" onClick={() => setIsShortcutsDialogOpen(false)}>
+                    Close
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             <AlertDialog
               open={isDeleteLabelOpen}
               onOpenChange={(open) => {
@@ -1953,6 +2003,8 @@ export default function ProjectAnnotatePage() {
           </aside>
         </div>
       </div>
-    </div>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

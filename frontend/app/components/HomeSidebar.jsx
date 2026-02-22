@@ -1,12 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { FolderKanban, LayoutGrid, Cpu } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { ChevronUp, Cpu, FolderKanban, LayoutGrid, LogOut, UserCircle2 } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -17,11 +20,32 @@ import {
   SidebarRail,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useAuthStore } from "../stores/authStore";
 
 export default function HomeSidebar() {
   const pathname = usePathname();
-  const isProjects = pathname === "/";
+  const router = useRouter();
+  const logoutWithApi = useAuthStore((state) => state.logoutWithApi);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const isProjects = pathname === "/" || pathname.startsWith("/projects/");
   const isModels = pathname === "/models";
+
+  const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+    setIsLoggingOut(true);
+    await logoutWithApi();
+    setIsLoggingOut(false);
+    toast.success("Logged out");
+    router.replace("/login");
+  };
 
   return (
     <>
@@ -58,6 +82,28 @@ export default function HomeSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
+        <SidebarSeparator />
+        <SidebarFooter className="p-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <SidebarMenuButton>
+                    <UserCircle2 />
+                    <span>Profile</span>
+                    <ChevronUp className="ml-auto" />
+                  </SidebarMenuButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="end" className="w-44">
+                  <DropdownMenuItem onClick={handleLogout} disabled={isLoggingOut}>
+                    <LogOut />
+                    <span>{isLoggingOut ? "Logging out..." : "Logout"}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
       </Sidebar>
       <SidebarRail />
     </>

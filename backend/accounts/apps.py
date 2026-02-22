@@ -6,6 +6,4 @@ class AccountsConfig(AppConfig):
     name = 'accounts'
 
     def ready(self) -> None:
-        from .bootstrap import ensure_default_user
-
-        ensure_default_user()
+        from . import signals  # noqa: F401
