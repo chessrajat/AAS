@@ -77,9 +77,12 @@ export default function ProjectAnnotatePage() {
   const imageContainerRef = useRef(null);
   const panStartRef = useRef(null);
   const panOffsetRef = useRef({ x: 0, y: 0 });
+  const spacePanPreviousToolRef = useRef(null);
+  const isSpacePanActiveRef = useRef(false);
   const [isUploading, setIsUploading] = useState(false);
   const [images, setImages] = useState([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [imageJumpValue, setImageJumpValue] = useState("1");
   const [zoom, setZoom] = useState(1);
   const [project, setProject] = useState(null);
   const [isLoadingProject, setIsLoadingProject] = useState(false);
@@ -151,6 +154,14 @@ export default function ProjectAnnotatePage() {
     };
     loadImages();
   }, [accessToken, params?.projectId, fetchProjectImages]);
+
+  useEffect(() => {
+    if (!hasImages) {
+      setImageJumpValue("");
+      return;
+    }
+    setImageJumpValue(String(activeIndex + 1));
+  }, [activeIndex, hasImages]);
 
   useEffect(() => {
     setActiveLabelId(null);
@@ -367,6 +378,71 @@ export default function ProjectAnnotatePage() {
       }
     }
   }, [activeTool]);
+
+  useEffect(() => {
+    const isEditableTarget = (target) => {
+      if (!(target instanceof HTMLElement)) {
+        return false;
+      }
+      const tag = target.tagName.toLowerCase();
+      if (target.isContentEditable) {
+        return true;
+      }
+      return tag === "input" || tag === "textarea" || tag === "select";
+    };
+
+    const handleKeyDown = (event) => {
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "d") {
+        setActiveTool("draw");
+        return;
+      }
+      if (key === "s") {
+        setActiveTool("select");
+        return;
+      }
+      if (key === "x") {
+        setActiveIndex((prev) => Math.min(prev + 1, images.length - 1));
+        return;
+      }
+      if (key === "z") {
+        setActiveIndex((prev) => Math.max(prev - 1, 0));
+        return;
+      }
+      if (event.code !== "Space" || event.repeat || isSpacePanActiveRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      spacePanPreviousToolRef.current = activeTool;
+      isSpacePanActiveRef.current = true;
+      setActiveTool("pan");
+    };
+
+    const handleKeyUp = (event) => {
+      if (event.code !== "Space" || !isSpacePanActiveRef.current) {
+        return;
+      }
+      event.preventDefault();
+      const previousTool = spacePanPreviousToolRef.current;
+      isSpacePanActiveRef.current = false;
+      spacePanPreviousToolRef.current = null;
+      if (previousTool) {
+        setActiveTool(previousTool);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [activeTool, images.length]);
 
   useEffect(() => {
     if (!selectedAnnotationId) {
@@ -594,6 +670,34 @@ export default function ProjectAnnotatePage() {
 
   const handleNextImage = () => {
     setActiveIndex((prev) => Math.min(prev + 1, images.length - 1));
+  };
+
+  const handleImageJumpChange = (event) => {
+    const digitsOnly = event.target.value.replace(/\D/g, "");
+    setImageJumpValue(digitsOnly);
+  };
+
+  const handleImageJump = () => {
+    if (!hasImages) {
+      return;
+    }
+    const nextIndex = Number(imageJumpValue);
+    if (!Number.isInteger(nextIndex) || nextIndex < 1 || nextIndex > images.length) {
+      toast.error("Invalid image number", {
+        description: `Enter a value between 1 and ${images.length}.`,
+      });
+      setImageJumpValue(String(activeIndex + 1));
+      return;
+    }
+    setActiveIndex(nextIndex - 1);
+  };
+
+  const handleImageJumpKeyDown = (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    handleImageJump();
   };
 
   const handleZoomOut = () => {
@@ -1290,6 +1394,29 @@ export default function ProjectAnnotatePage() {
                     ? `Image ${activeIndex + 1}/${images.length}`
                     : "No images"}
                 </Badge>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-500">Go to</span>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={imageJumpValue}
+                    onChange={handleImageJumpChange}
+                    onKeyDown={handleImageJumpKeyDown}
+                    disabled={!hasImages}
+                    className="h-7 w-16 bg-white px-2 text-xs"
+                    aria-label="Go to image number"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={handleImageJump}
+                    disabled={!hasImages}
+                  >
+                    Go
+                  </Button>
+                </div>
                 <span>{imageName}</span>
                 {hasImages ? (
                   <Button
