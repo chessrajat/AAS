@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { apiClient } from "./api";
+import { getApiErrorMessage } from "./errorUtils";
 
 
 export const useAuthStore = create()(
@@ -10,10 +11,27 @@ export const useAuthStore = create()(
     (set, get) => ({
       accessToken: null,
       refreshToken: null,
+      canManageUsers: false,
+      permissionsLoaded: false,
       isLoading: false,
       hasHydrated: false,
       error: null,
       setHasHydrated: (value) => set({ hasHydrated: value }),
+      resolveUserManagementAccess: async () => {
+        const accessToken = get().accessToken;
+        if (!accessToken) {
+          set({ canManageUsers: false, permissionsLoaded: true });
+          return false;
+        }
+        try {
+          await apiClient.options("/api/auth/users/");
+          set({ canManageUsers: true, permissionsLoaded: true });
+          return true;
+        } catch {
+          set({ canManageUsers: false, permissionsLoaded: true });
+          return false;
+        }
+      },
       login: async (username, password) => {
         set({ isLoading: true, error: null });
         try {
@@ -25,14 +43,14 @@ export const useAuthStore = create()(
           set({
             accessToken: data.access,
             refreshToken: data.refresh,
+            canManageUsers: false,
+            permissionsLoaded: false,
             isLoading: false,
             error: null,
           });
           return true;
         } catch (error) {
-          const message =
-            error?.response?.data?.detail ||
-            (error instanceof Error ? error.message : "Login failed");
+          const message = getApiErrorMessage(error, "Login failed");
           set({ isLoading: false, error: message });
           return false;
         }
@@ -51,14 +69,18 @@ export const useAuthStore = create()(
           const data = response.data;
           set({
             accessToken: data.access,
+            canManageUsers: false,
+            permissionsLoaded: false,
             isLoading: false,
             error: null,
           });
           return true;
-        } catch (error) {
+        } catch {
           set({
             accessToken: null,
             refreshToken: null,
+            canManageUsers: false,
+            permissionsLoaded: false,
             isLoading: false,
             error: "Session expired",
           });
@@ -77,6 +99,8 @@ export const useAuthStore = create()(
           set({
             accessToken: null,
             refreshToken: null,
+            canManageUsers: false,
+            permissionsLoaded: false,
             isLoading: false,
             error: null,
           });
@@ -86,6 +110,8 @@ export const useAuthStore = create()(
         set({
           accessToken: null,
           refreshToken: null,
+          canManageUsers: false,
+          permissionsLoaded: false,
           isLoading: false,
           error: null,
         }),
@@ -97,6 +123,8 @@ export const useAuthStore = create()(
       partialize: (state) => ({
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
+        canManageUsers: state.canManageUsers,
+        permissionsLoaded: state.permissionsLoaded,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);

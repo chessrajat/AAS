@@ -29,12 +29,29 @@ from .serializers import (
     ProjectClassSerializer,
     ProjectSerializer,
 )
+from .permissions import ALL_PROJECT_ROLES, HasAnnotateRolePermission
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.prefetch_related('classes').all()
     serializer_class = ProjectSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
+    role_permissions = {
+        'list': ALL_PROJECT_ROLES,
+        'retrieve': ALL_PROJECT_ROLES,
+        'create': {'owner', 'manager'},
+        'update': {'owner', 'manager'},
+        'partial_update': {'owner', 'manager'},
+        'destroy': {'owner'},
+        'upload_images:GET': ALL_PROJECT_ROLES,
+        'upload_images:POST': {'owner', 'manager'},
+        'add_class': {'owner', 'manager'},
+        'export_project': {'owner', 'manager'},
+        'auto_annotate_configs:GET': {'owner', 'manager'},
+        'auto_annotate_configs:POST': {'owner', 'manager'},
+        'auto_annotate_config_detail': {'owner', 'manager'},
+        'auto_annotate_run': {'owner', 'manager'},
+    }
 
     @action(
         detail=True,
@@ -225,7 +242,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
 class ImageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
     queryset = Image.objects.select_related('project').all()
     serializer_class = ImageSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
+    role_permissions = {
+        'destroy': {'owner', 'manager'},
+        'annotations:GET': ALL_PROJECT_ROLES,
+        'annotations:POST': {'owner', 'manager', 'annotator'},
+    }
 
     @action(detail=True, methods=['get', 'post'], url_path='annotations')
     def annotations(self, request, pk=None):
@@ -262,7 +284,12 @@ class AnnotationViewSet(
 ):
     queryset = Annotation.objects.select_related('image', 'project_class').all()
     serializer_class = AnnotationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
+    role_permissions = {
+        'update': {'owner', 'manager', 'annotator'},
+        'partial_update': {'owner', 'manager', 'annotator'},
+        'destroy': {'owner', 'manager', 'annotator'},
+    }
 
 
 class ProjectClassViewSet(
@@ -271,7 +298,10 @@ class ProjectClassViewSet(
 ):
     queryset = ProjectClass.objects.select_related('project').all()
     serializer_class = ProjectClassSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
+    role_permissions = {
+        'destroy': {'owner', 'manager'},
+    }
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -282,4 +312,12 @@ class ProjectClassViewSet(
 class AIModelViewSet(viewsets.ModelViewSet):
     queryset = AIModel.objects.all().order_by('id')
     serializer_class = AIModelSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
+    role_permissions = {
+        'list': ALL_PROJECT_ROLES,
+        'retrieve': ALL_PROJECT_ROLES,
+        'create': {'owner', 'manager'},
+        'update': {'owner', 'manager'},
+        'partial_update': {'owner', 'manager'},
+        'destroy': {'owner', 'manager'},
+    }

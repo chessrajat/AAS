@@ -2,13 +2,16 @@
 
 import { create } from "zustand";
 import { apiClient, uploadClient } from "./api";
+import { getApiErrorMessage } from "./errorUtils";
 
 
 export const useApiStore = create((set) => ({
   projects: [],
   models: [],
+  users: [],
   isLoadingProjects: false,
   isLoadingModels: false,
+  isLoadingUsers: false,
   isCreatingProject: false,
   isCreatingModel: false,
   error: null,
@@ -23,10 +26,7 @@ export const useApiStore = create((set) => ({
       set({ isLoadingProjects: false, error: null, projects: data });
       return { ok: true, data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to load projects");
+      const message = getApiErrorMessage(error, "Unable to load projects");
       set({ isLoadingProjects: false, error: message });
       return { ok: false, error: message };
     }
@@ -41,11 +41,73 @@ export const useApiStore = create((set) => ({
       set({ isLoadingModels: false, error: null, models: data });
       return { ok: true, data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to load models");
+      const message = getApiErrorMessage(error, "Unable to load models");
       set({ isLoadingModels: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchUsers: async (token) => {
+    set({ isLoadingUsers: true, error: null });
+    try {
+      const response = await apiClient.get("/api/auth/users/", {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const data = response.data;
+      set({ isLoadingUsers: false, error: null, users: data });
+      return { ok: true, data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load users");
+      set({ isLoadingUsers: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createUser: async (payload) => {
+    set({ error: null });
+    try {
+      const response = await apiClient.post("/api/auth/users/", payload);
+      const data = response.data;
+      set((state) => ({
+        users: [data, ...state.users],
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create user");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateUser: async (userId, payload) => {
+    set({ error: null });
+    if (!userId) {
+      return { ok: false, error: "Missing user id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/auth/users/${userId}/`, payload);
+      const data = response.data;
+      set((state) => ({
+        users: state.users.map((user) => (user.id === userId ? data : user)),
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update user");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteUser: async (userId) => {
+    set({ error: null });
+    if (!userId) {
+      return { ok: false, error: "Missing user id" };
+    }
+    try {
+      await apiClient.delete(`/api/auth/users/${userId}/`);
+      set((state) => ({
+        users: state.users.filter((user) => user.id !== userId),
+      }));
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete user");
+      set({ error: message });
       return { ok: false, error: message };
     }
   },
@@ -63,10 +125,7 @@ export const useApiStore = create((set) => ({
       }));
       return { ok: true, data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to create project");
+      const message = getApiErrorMessage(error, "Unable to create project");
       set({ isCreatingProject: false, error: message });
       return { ok: false, error: message };
     }
@@ -97,10 +156,7 @@ export const useApiStore = create((set) => ({
       }));
       return { ok: true, data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to create model");
+      const message = getApiErrorMessage(error, "Unable to create model");
       set({ isCreatingModel: false, error: message });
       return { ok: false, error: message };
     }
@@ -117,10 +173,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to create label");
+      const message = getApiErrorMessage(error, "Unable to create label");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -134,10 +187,7 @@ export const useApiStore = create((set) => ({
       await apiClient.delete(`/api/annotate/classes/${classId}/`);
       return { ok: true };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to delete label");
+      const message = getApiErrorMessage(error, "Unable to delete label");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -163,10 +213,7 @@ export const useApiStore = create((set) => ({
       });
       return { ok: true, data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to load project");
+      const message = getApiErrorMessage(error, "Unable to load project");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -196,10 +243,7 @@ export const useApiStore = create((set) => ({
       }));
       return { ok: true, data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Upload failed");
+      const message = getApiErrorMessage(error, "Upload failed");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -215,10 +259,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to load images");
+      const message = getApiErrorMessage(error, "Unable to load images");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -232,10 +273,7 @@ export const useApiStore = create((set) => ({
       const response = await apiClient.get(`/api/annotate/images/${imageId}/annotations/`);
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to load annotations");
+      const message = getApiErrorMessage(error, "Unable to load annotations");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -252,10 +290,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to create annotation");
+      const message = getApiErrorMessage(error, "Unable to create annotation");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -272,10 +307,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to update annotation");
+      const message = getApiErrorMessage(error, "Unable to update annotation");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -289,10 +321,7 @@ export const useApiStore = create((set) => ({
       await apiClient.delete(`/api/annotate/annotations/${annotationId}/`);
       return { ok: true };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to delete annotation");
+      const message = getApiErrorMessage(error, "Unable to delete annotation");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -318,10 +347,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to export project");
+      const message = getApiErrorMessage(error, "Unable to export project");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -335,10 +361,7 @@ export const useApiStore = create((set) => ({
       await apiClient.delete(`/api/annotate/images/${imageId}/`);
       return { ok: true };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to delete image");
+      const message = getApiErrorMessage(error, "Unable to delete image");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -355,10 +378,7 @@ export const useApiStore = create((set) => ({
       }));
       return { ok: true };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to delete project");
+      const message = getApiErrorMessage(error, "Unable to delete project");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -374,10 +394,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to load configs");
+      const message = getApiErrorMessage(error, "Unable to load configs");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -394,10 +411,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to save config");
+      const message = getApiErrorMessage(error, "Unable to save config");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -414,10 +428,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Unable to update config");
+      const message = getApiErrorMessage(error, "Unable to update config");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -434,10 +445,7 @@ export const useApiStore = create((set) => ({
       );
       return { ok: true, data: response.data };
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.error ||
-        (error instanceof Error ? error.message : "Auto-annotate failed");
+      const message = getApiErrorMessage(error, "Auto-annotate failed");
       set({ error: message });
       return { ok: false, error: message };
     }

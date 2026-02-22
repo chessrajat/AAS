@@ -1,9 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronUp, Cpu, FolderKanban, LayoutGrid, LogOut, UserCircle2 } from "lucide-react";
+import {
+  ChevronUp,
+  Cpu,
+  FolderKanban,
+  LayoutGrid,
+  LogOut,
+  ShieldUser,
+  UserCircle2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -31,10 +39,24 @@ import { useAuthStore } from "../stores/authStore";
 export default function HomeSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const canManageUsers = useAuthStore((state) => state.canManageUsers);
+  const permissionsLoaded = useAuthStore((state) => state.permissionsLoaded);
+  const resolveUserManagementAccess = useAuthStore(
+    (state) => state.resolveUserManagementAccess,
+  );
   const logoutWithApi = useAuthStore((state) => state.logoutWithApi);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isProjects = pathname === "/" || pathname.startsWith("/projects/");
   const isModels = pathname === "/models";
+  const isUsers = pathname === "/users";
+
+  useEffect(() => {
+    if (!accessToken || permissionsLoaded) {
+      return;
+    }
+    resolveUserManagementAccess();
+  }, [accessToken, permissionsLoaded, resolveUserManagementAccess]);
 
   const handleLogout = async () => {
     if (isLoggingOut) {
@@ -78,6 +100,16 @@ export default function HomeSidebar() {
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                {canManageUsers ? (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={isUsers}>
+                      <Link href="/users">
+                        <ShieldUser />
+                        <span>User Management</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ) : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

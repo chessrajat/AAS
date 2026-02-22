@@ -1,8 +1,15 @@
+from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.viewsets import ModelViewSet
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+
+from .permissions import IsAdminRole
+from .serializers import UserManagementSerializer
+
+User = get_user_model()
 
 
 class LogoutView(APIView):
@@ -26,3 +33,9 @@ class LogoutView(APIView):
             )
 
         return Response({'detail': 'Logged out successfully.'}, status=status.HTTP_200_OK)
+
+
+class UserManagementViewSet(ModelViewSet):
+    queryset = User.objects.select_related('profile').all().order_by('id')
+    serializer_class = UserManagementSerializer
+    permission_classes = [IsAuthenticated, IsAdminRole]
