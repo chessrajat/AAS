@@ -78,6 +78,7 @@ export default function ProjectAnnotatePage() {
   const imageContainerRef = useRef(null);
   const panStartRef = useRef(null);
   const panOffsetRef = useRef({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
   const spacePanPreviousToolRef = useRef(null);
   const isSpacePanActiveRef = useRef(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -140,6 +141,7 @@ export default function ProjectAnnotatePage() {
     { key: "S", description: "Switch to Select/Move tool." },
     { key: "X", description: "Go to next image." },
     { key: "Z", description: "Go to previous image." },
+    { key: "Q", description: "Delete the current image." },
     { key: "Space (hold)", description: "Temporarily switch to Pan tool." },
     { key: "Delete", description: "Delete selected annotation." },
   ];
@@ -423,6 +425,12 @@ export default function ProjectAnnotatePage() {
         setActiveIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
+      if (key === "q") {
+        if (activeImage && !isDeleteImageOpen) {
+          handleOpenDeleteImage(activeImage);
+        }
+        return;
+      }
       if (event.code !== "Space" || event.repeat || isSpacePanActiveRef.current) {
         return;
       }
@@ -452,7 +460,7 @@ export default function ProjectAnnotatePage() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [activeTool, images.length]);
+  }, [activeTool, images.length, activeImage, isDeleteImageOpen]);
 
   useEffect(() => {
     if (!selectedAnnotationId) {
@@ -495,6 +503,10 @@ export default function ProjectAnnotatePage() {
   useEffect(() => {
     panOffsetRef.current = panOffset;
   }, [panOffset]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
 
   useEffect(() => {
     if (!imageMeta.naturalWidth || !imageMeta.naturalHeight) {
@@ -718,6 +730,39 @@ export default function ProjectAnnotatePage() {
 
   const handleZoomIn = () => {
     setZoom((prev) => Math.min(maxZoom, Number((prev + zoomStep).toFixed(2))));
+  };
+
+  const handleCanvasWheel = (event) => {
+    if (!activeImage) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const currentZoom = zoomRef.current;
+    const direction = event.deltaY > 0 ? -1 : 1;
+    const nextZoom = Math.min(
+      maxZoom,
+      Math.max(minZoom, Number((currentZoom + direction * zoomStep).toFixed(2))),
+    );
+
+    if (nextZoom === currentZoom) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left;
+    const pointerY = event.clientY - rect.top;
+    const contentX = pointerX / currentZoom;
+    const contentY = pointerY / currentZoom;
+    const nextLeft = event.clientX - contentX * nextZoom;
+    const nextTop = event.clientY - contentY * nextZoom;
+
+    setPanOffset((prev) => ({
+      x: prev.x + (nextLeft - rect.left),
+      y: prev.y + (nextTop - rect.top),
+    }));
+    setZoom(nextZoom);
   };
 
   const handleExportProject = async () => {
@@ -1502,6 +1547,7 @@ export default function ProjectAnnotatePage() {
                           transform: `scale(${zoom})`,
                           transformOrigin: "top left",
                         }}
+                        onWheel={handleCanvasWheel}
                       >
                         <img
                           src={activeImage?.file_url}
