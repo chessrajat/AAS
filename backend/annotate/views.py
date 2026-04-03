@@ -1,4 +1,4 @@
-from PIL import Image as PilImage
+from PIL import Image as PilImage, UnidentifiedImageError
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -9,7 +9,7 @@ import io
 import os
 import zipfile
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 
 from .annotate import AutoAnnotateError, get_auto_annotate_config, run_auto_annotation
@@ -74,16 +74,31 @@ class ProjectViewSet(viewsets.ModelViewSet):
             )
 
         created = []
-        for file_obj in files:
-            image = PilImage.open(file_obj)
-            width, height = image.size
-            created.append(
-                Image.objects.create(
-                    project=project,
-                    file=file_obj,
-                    width=width,
-                    height=height,
-                )
+        try:
+            with transaction.atomic():
+                for file_obj in files:
+                    try:
+                        with PilImage.open(file_obj) as image_file:
+                            width, height = image_file.size
+                    except (UnidentifiedImageError, OSError):
+                        return Response(
+                            {'detail': f"Invalid image file: {file_obj.name}."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    file_obj.seek(0)
+                    created.append(
+                        Image.objects.create(
+                            project=project,
+                            file=file_obj,
+                            width=width,
+                            height=height,
+                        )
+                    )
+        except Exception:
+            return Response(
+                {'detail': 'Upload failed while saving images.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
         serializer = ImageSerializer(created, many=True, context={'request': request})
