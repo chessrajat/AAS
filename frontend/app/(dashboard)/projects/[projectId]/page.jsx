@@ -1608,6 +1608,7 @@ export default function ProjectAnnotatePage() {
                           );
                           const width = annotation.x_max - annotation.x_min;
                           const height = annotation.y_max - annotation.y_min;
+                          const labelColor = label?.color || "#3b82f6";
                           return (
                             <Card
                               key={annotation.id}
@@ -1660,9 +1661,17 @@ export default function ProjectAnnotatePage() {
                                   ) : null}
                                 </div>
                               </div>
-                              <p className="mt-2 text-xs text-slate-500">
-                                {width} × {height} • {label?.color || "#3b82f6"}
-                              </p>
+                              <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+                                <span>{width} × {height}</span>
+                                <span>•</span>
+                                <span
+                                  className="h-3.5 w-3.5 rounded-full border border-slate-300 shadow-sm"
+                                  style={{ backgroundColor: labelColor }}
+                                  aria-label={`Color preview ${labelColor}`}
+                                  title={labelColor}
+                                />
+                                <span className="font-mono">{labelColor}</span>
+                              </div>
                             </Card>
                           );
                         })
@@ -1794,17 +1803,6 @@ export default function ProjectAnnotatePage() {
                                   <span className="text-xs text-slate-400">
                                     Index {label.index}
                                   </span>
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-7 w-7 text-red-500 hover:text-red-600"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handleOpenDeleteLabel(label);
-                                    }}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
                                 </div>
                               </div>
                               <p className="mt-2 text-xs text-slate-500">
