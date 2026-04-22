@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useAuthStore } from "./stores/authStore";
 import { useApiStore } from "./stores/apiStore";
@@ -35,6 +35,7 @@ export default function Home() {
   const {
     createProject,
     deleteProject,
+    updateProject,
     fetchProjects,
     isCreatingProject,
     isLoadingProjects,
@@ -48,6 +49,9 @@ export default function Home() {
   ]);
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState(null);
+  const [projectToEdit, setProjectToEdit] = useState(null);
+  const [editProjectName, setEditProjectName] = useState("");
+  const [isUpdatingProject, setIsUpdatingProject] = useState(false);
 
   const resetProjectForm = () => {
     setProjectName("");
@@ -116,6 +120,41 @@ export default function Home() {
     });
     setIsProjectModalOpen(false);
     resetProjectForm();
+  };
+
+  const handleOpenEditProject = (project) => {
+    setProjectToEdit(project);
+    setEditProjectName(project.name || "");
+  };
+
+  const handleConfirmEditProject = async (event) => {
+    event.preventDefault();
+    if (!projectToEdit) {
+      return;
+    }
+
+    const nextName = editProjectName.trim();
+    if (!nextName) {
+      toast.error("Project name is required.");
+      return;
+    }
+
+    setIsUpdatingProject(true);
+    const result = await updateProject(projectToEdit.id, { name: nextName });
+    setIsUpdatingProject(false);
+
+    if (!result.ok) {
+      toast.error("Project update failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+
+    toast.success("Project renamed", {
+      description: nextName,
+    });
+    setProjectToEdit(null);
+    setEditProjectName("");
   };
 
   const handleOpenDeleteProject = (project) => {
@@ -318,6 +357,15 @@ export default function Home() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleOpenEditProject(project);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                          Edit project
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           variant="destructive"
                           onClick={(event) => {
                             event.stopPropagation();
@@ -335,6 +383,49 @@ export default function Home() {
             </div>
           )}
         </div>
+        <Dialog
+          open={Boolean(projectToEdit)}
+          onOpenChange={(open) => {
+            if (!open && !isUpdatingProject) {
+              setProjectToEdit(null);
+              setEditProjectName("");
+            }
+          }}
+        >
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Rename project</DialogTitle>
+            </DialogHeader>
+            <form className="space-y-4" onSubmit={handleConfirmEditProject}>
+              <div className="space-y-2">
+                <Label htmlFor="edit-project-name">Project name</Label>
+                <Input
+                  id="edit-project-name"
+                  value={editProjectName}
+                  onChange={(event) => setEditProjectName(event.target.value)}
+                  placeholder="Project name"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isUpdatingProject}
+                  onClick={() => {
+                    setProjectToEdit(null);
+                    setEditProjectName("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isUpdatingProject}>
+                  {isUpdatingProject ? "Saving..." : "Save changes"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
         <AlertDialog
           open={isDeleteProjectOpen}
           onOpenChange={(open) => {

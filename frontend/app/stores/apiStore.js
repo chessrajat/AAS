@@ -161,6 +161,23 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  deleteModel: async (modelId) => {
+    set({ error: null });
+    if (!modelId) {
+      return { ok: false, error: "Missing model id" };
+    }
+    try {
+      await apiClient.delete(`/api/annotate/models/${modelId}/`);
+      set((state) => ({
+        models: state.models.filter((model) => model.id !== modelId),
+      }));
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete model");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
   createProjectClass: async (projectId, payload) => {
     set({ error: null });
     if (!projectId) {
@@ -362,6 +379,26 @@ export const useApiStore = create((set) => ({
       return { ok: true };
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to delete image");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateProject: async (projectId, payload) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/annotate/projects/${projectId}/`, payload);
+      const data = response.data;
+      set((state) => ({
+        projects: state.projects.map((project) =>
+          project.id === projectId ? data : project,
+        ),
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update project");
       set({ error: message });
       return { ok: false, error: message };
     }

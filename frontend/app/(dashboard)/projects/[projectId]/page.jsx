@@ -81,6 +81,7 @@ export default function ProjectAnnotatePage() {
   const zoomRef = useRef(1);
   const spacePanPreviousToolRef = useRef(null);
   const isSpacePanActiveRef = useRef(false);
+  const lastPointerPositionRef = useRef({ x: 0, y: 0 });
   const [isUploading, setIsUploading] = useState(false);
   const [images, setImages] = useState([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -121,6 +122,7 @@ export default function ProjectAnnotatePage() {
   const [isDeleteImageOpen, setIsDeleteImageOpen] = useState(false);
   const [imageToDelete, setImageToDelete] = useState(null);
   const [isShortcutsDialogOpen, setIsShortcutsDialogOpen] = useState(false);
+  const [isShortcutLabelPickerOpen, setIsShortcutLabelPickerOpen] = useState(false);
   const [imageMeta, setImageMeta] = useState({
     naturalWidth: 0,
     naturalHeight: 0,
@@ -135,6 +137,7 @@ export default function ProjectAnnotatePage() {
   const imageName = activeImage?.file?.split("/").pop() || "No image";
   const projectLabels = project?.classes ?? [];
   const hasLabels = projectLabels.length > 0;
+  const activeLabel = projectLabels.find((label) => label.id === activeLabelId);
   const annotationCount = annotations.length;
   const keyboardShortcuts = [
     { key: "D", description: "Switch to Draw bounding box tool." },
@@ -142,6 +145,7 @@ export default function ProjectAnnotatePage() {
     { key: "X", description: "Go to next image." },
     { key: "Z", description: "Go to previous image." },
     { key: "Q", description: "Delete the current image." },
+    { key: "C (hold)", description: "Open label picker while drawing over an image." },
     { key: "Space (hold)", description: "Temporarily switch to Pan tool." },
     { key: "Delete", description: "Delete selected annotation." },
   ];
@@ -373,6 +377,31 @@ export default function ProjectAnnotatePage() {
   }, [activeTool]);
 
   useEffect(() => {
+    const handlePointerMove = (event) => {
+      lastPointerPositionRef.current = { x: event.clientX, y: event.clientY };
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    return () => window.removeEventListener("pointermove", handlePointerMove);
+  }, []);
+
+  useEffect(() => {
+    if (activeTool !== "draw") {
+      setIsShortcutLabelPickerOpen(false);
+    }
+  }, [activeTool]);
+
+  const isLastPointerOverImage = () => {
+    const target = canvasRef.current;
+    if (!target) {
+      return false;
+    }
+    const rect = target.getBoundingClientRect();
+    const { x, y } = lastPointerPositionRef.current;
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  };
+
+  useEffect(() => {
     if (activeTool !== "select") {
       setIsDraggingAnnotation(false);
       setIsResizingAnnotation(false);
@@ -409,6 +438,18 @@ export default function ProjectAnnotatePage() {
       }
 
       const key = event.key.toLowerCase();
+      if (key === "c") {
+        if (
+          activeTool === "draw" &&
+          isLastPointerOverImage() &&
+          hasLabels &&
+          !event.repeat
+        ) {
+          event.preventDefault();
+          setIsShortcutLabelPickerOpen(true);
+        }
+        return;
+      }
       if (key === "d") {
         setActiveTool("draw");
         return;
@@ -442,6 +483,10 @@ export default function ProjectAnnotatePage() {
     };
 
     const handleKeyUp = (event) => {
+      if (event.key.toLowerCase() === "c") {
+        setIsShortcutLabelPickerOpen(false);
+        return;
+      }
       if (event.code !== "Space" || !isSpacePanActiveRef.current) {
         return;
       }
@@ -460,7 +505,13 @@ export default function ProjectAnnotatePage() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [activeTool, images.length, activeImage, isDeleteImageOpen]);
+  }, [
+    activeTool,
+    images.length,
+    activeImage,
+    isDeleteImageOpen,
+    hasLabels,
+  ]);
 
   useEffect(() => {
     if (!selectedAnnotationId) {
@@ -1969,6 +2020,66 @@ export default function ProjectAnnotatePage() {
                     {isSavingAutoAnnotate ? "Saving..." : "Save configuration"}
                   </Button>
                 </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            <Dialog
+              open={isShortcutLabelPickerOpen}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setIsShortcutLabelPickerOpen(false);
+                }
+              }}
+            >
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Select label</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-500">
+                    Hold C while your cursor is over the image, then choose the label
+                    to draw with. Release C to close this picker.
+                  </p>
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {projectLabels.map((label) => {
+                      const labelColor = label.color || "#3b82f6";
+                      const isActive = activeLabelId === label.id;
+                      return (
+                        <button
+                          key={label.id}
+                          type="button"
+                          className={
+                            "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition " +
+                            (isActive
+                              ? "border-slate-900 bg-slate-900 text-white"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50")
+                          }
+                          onClick={() => setActiveLabelId(label.id)}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span
+                              className="h-3 w-3 shrink-0 rounded-full border border-slate-300"
+                              style={{ backgroundColor: labelColor }}
+                            />
+                            <span className="truncate font-medium">{label.name}</span>
+                          </span>
+                          <span
+                            className={
+                              "ml-3 shrink-0 font-mono text-xs " +
+                              (isActive ? "text-slate-200" : "text-slate-400")
+                            }
+                          >
+                            {labelColor}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {activeLabel ? (
+                    <p className="text-xs text-slate-500">
+                      Drawing with <span className="font-medium text-slate-700">{activeLabel.name}</span>.
+                    </p>
+                  ) : null}
+                </div>
               </DialogContent>
             </Dialog>
             <Dialog open={isShortcutsDialogOpen} onOpenChange={setIsShortcutsDialogOpen}>
