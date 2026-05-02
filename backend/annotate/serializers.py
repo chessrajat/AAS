@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from rest_framework import serializers
 from ultralytics import YOLO
@@ -11,9 +12,12 @@ from .models import (
     AutoAnnotateClassMapping,
     AutoAnnotateConfig,
     Image,
+    Job,
     Project,
     ProjectClass,
 )
+
+User = get_user_model()
 
 
 class ProjectClassSerializer(serializers.ModelSerializer):
@@ -142,6 +146,52 @@ class ProjectSerializer(serializers.ModelSerializer):
         return instance
 
 
+class JobSerializer(serializers.ModelSerializer):
+    assignees = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        many=True,
+        required=False,
+    )
+    image_count = serializers.IntegerField(read_only=True)
+    project = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Job
+        fields = (
+            'id',
+            'project',
+            'name',
+            'description',
+            'status',
+            'assignees',
+            'image_count',
+        )
+
+    def create(self, validated_data):
+        assignees = validated_data.pop('assignees', [])
+        project = self.context.get('project')
+        request = self.context.get('request')
+        if not project:
+            raise serializers.ValidationError("Missing project context.")
+        job = Job.objects.create(
+            project=project,
+            created_by=request.user if request and request.user.is_authenticated else None,
+            **validated_data,
+        )
+        if assignees:
+            job.assignees.set(assignees)
+        return job
+
+    def update(self, instance, validated_data):
+        assignees = validated_data.pop('assignees', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if assignees is not None:
+            instance.assignees.set(assignees)
+        return instance
+
+
 class AutoAnnotateClassMappingSerializer(serializers.ModelSerializer):
     project_class = serializers.PrimaryKeyRelatedField(queryset=ProjectClass.objects.all())
 
@@ -228,7 +278,8 @@ class ImageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Image
-        fields = ('id', 'file', 'file_url', 'width', 'height', 'status')
+        fields = ('id', 'job', 'file', 'file_url', 'width', 'height', 'status')
+        read_only_fields = ('job',)
 
     def get_file_url(self, obj):
         request = self.context.get('request')
@@ -246,3 +297,12 @@ class AnnotationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Annotation
         fields = ('id', 'image', 'project_class', 'x_min', 'y_min', 'x_max', 'y_max')
+
+    def validate(self, attrs):
+        project_class = attrs.get('project_class')
+        image = self.instance.image if self.instance else None
+        if image and project_class and project_class.project_id != image.job.project_id:
+            raise serializers.ValidationError(
+                {'project_class': 'Project class does not belong to this image project.'}
+            )
+        return attrs

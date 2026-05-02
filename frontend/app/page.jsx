@@ -328,7 +328,7 @@ export default function Home() {
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {projects.map((project) => (
                 <div key={project.id} className="relative">
-                  <Link href={`/projects/${project.id}`} className="block">
+                  <Link href={`/projects/${project.id}/jobs`} className="block">
                     <Card className="border-slate-200/70 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
                       <div className="space-y-2">
                         <h2 className="text-lg font-semibold text-slate-900">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
@@ -53,10 +53,13 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 export default function ProjectAnnotatePage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
+  const requestedJobId = searchParams.get("jobId") || "";
   const accessToken = useAuthStore((state) => state.accessToken);
   const {
-    uploadProjectImages,
-    fetchProjectImages,
+    uploadJobImages,
+    fetchJobImages,
+    fetchProjectJobs,
     fetchProject,
     fetchAnnotations,
     createAnnotation,
@@ -64,6 +67,7 @@ export default function ProjectAnnotatePage() {
     deleteAnnotation,
     createProjectClass,
     exportProject,
+    exportJob,
     deleteProjectClass,
     deleteImage,
     fetchAutoAnnotateConfigs,
@@ -71,7 +75,7 @@ export default function ProjectAnnotatePage() {
     models,
     createAutoAnnotateConfig,
     updateAutoAnnotateConfig,
-    runAutoAnnotate,
+    runJobAutoAnnotate,
   } = useApiStore();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -84,6 +88,8 @@ export default function ProjectAnnotatePage() {
   const lastPointerPositionRef = useRef({ x: 0, y: 0 });
   const [isUploading, setIsUploading] = useState(false);
   const [images, setImages] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [activeJobId, setActiveJobId] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [imageJumpValue, setImageJumpValue] = useState("1");
   const [zoom, setZoom] = useState(1);
@@ -133,6 +139,7 @@ export default function ProjectAnnotatePage() {
   const maxZoom = 3;
   const zoomStep = 0.05;
   const hasImages = images.length > 0;
+  const activeJob = jobs.find((job) => String(job.id) === String(activeJobId));
   const activeImage = hasImages ? images[activeIndex] : null;
   const imageName = activeImage?.file?.split("/").pop() || "No image";
   const projectLabels = project?.classes ?? [];
@@ -161,15 +168,58 @@ export default function ProjectAnnotatePage() {
       return;
     }
 
+    let isMounted = true;
+    const loadJobs = async () => {
+      const result = await fetchProjectJobs(params.projectId);
+      if (result.ok) {
+        const nextJobs = result.data || [];
+        if (!isMounted) {
+          return;
+        }
+        setJobs(nextJobs);
+        const requestedJob = nextJobs.find(
+          (job) => String(job.id) === String(requestedJobId),
+        );
+        setActiveJobId(
+          requestedJob?.id
+            ? String(requestedJob.id)
+            : nextJobs[0]?.id
+              ? String(nextJobs[0].id)
+              : "",
+        );
+      }
+    };
+    loadJobs();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [accessToken, params?.projectId, fetchProjectJobs, requestedJobId]);
+
+  useEffect(() => {
+    if (!accessToken || !activeJobId) {
+      setImages([]);
+      setActiveIndex(0);
+      return;
+    }
+
+    let isMounted = true;
     const loadImages = async () => {
-      const result = await fetchProjectImages(params.projectId);
+      const result = await fetchJobImages(activeJobId);
+      if (!isMounted) {
+        return;
+      }
       if (result.ok) {
         setImages(result.data || []);
         setActiveIndex(0);
       }
     };
     loadImages();
-  }, [accessToken, params?.projectId, fetchProjectImages]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [accessToken, activeJobId, fetchJobImages]);
 
   useEffect(() => {
     if (!hasImages) {
@@ -181,6 +231,9 @@ export default function ProjectAnnotatePage() {
 
   useEffect(() => {
     setActiveLabelId(null);
+    setActiveJobId("");
+    setJobs([]);
+    setImages([]);
   }, [params?.projectId]);
 
   useEffect(() => {
@@ -298,11 +351,12 @@ export default function ProjectAnnotatePage() {
   };
 
   const handleRunAutoAnnotate = async () => {
-    if (!params?.projectId) {
+    if (!activeJobId) {
+      toast.error("Create or select a job first.");
       return;
     }
     setIsAutoAnnotating(true);
-    const result = await runAutoAnnotate(params.projectId);
+    const result = await runJobAutoAnnotate(activeJobId);
     setIsAutoAnnotating(false);
     if (!result.ok) {
       toast.error("Auto-annotate failed", {
@@ -468,7 +522,8 @@ export default function ProjectAnnotatePage() {
       }
       if (key === "q") {
         if (activeImage && !isDeleteImageOpen) {
-          handleOpenDeleteImage(activeImage);
+          setImageToDelete(activeImage);
+          setIsDeleteImageOpen(true);
         }
         return;
       }
@@ -706,6 +761,10 @@ export default function ProjectAnnotatePage() {
   ]);
 
   const handleUploadClick = () => {
+    if (!activeJobId) {
+      toast.error("Create or select a job first.");
+      return;
+    }
     fileInputRef.current?.click();
   };
 
@@ -716,7 +775,7 @@ export default function ProjectAnnotatePage() {
     }
 
     setIsUploading(true);
-    const result = await uploadProjectImages(params?.projectId, files);
+    const result = await uploadJobImages(activeJobId, files);
     setIsUploading(false);
     event.target.value = "";
 
@@ -730,12 +789,16 @@ export default function ProjectAnnotatePage() {
     const nextImages = result.data || [];
     setImages(nextImages);
     setActiveIndex(0);
-    const refreshed = await fetchProjectImages(params?.projectId);
+    const refreshed = await fetchJobImages(activeJobId);
     if (refreshed.ok) {
       setImages(refreshed.data || []);
     }
+    const jobsResult = await fetchProjectJobs(params?.projectId);
+    if (jobsResult.ok) {
+      setJobs(jobsResult.data || []);
+    }
     toast.success("Images uploaded", {
-      description: `${files.length} image(s) added to the project.`,
+      description: `${files.length} image(s) added to ${activeJob?.name || "the job"}.`,
     });
   };
 
@@ -842,6 +905,33 @@ export default function ProjectAnnotatePage() {
     setIsExporting(false);
   };
 
+  const handleExportJob = async () => {
+    if (!activeJobId) {
+      toast.error("Create or select a job first.");
+      return;
+    }
+    setIsExporting(true);
+    setExportProgress(0);
+    const result = await exportJob(activeJobId, setExportProgress);
+    if (!result.ok) {
+      toast.error("Export failed", {
+        description: result.error || "Please try again.",
+      });
+      setIsExporting(false);
+      return;
+    }
+
+    const blobUrl = window.URL.createObjectURL(result.data);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `job-${activeJobId}-yolov8.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+    setIsExporting(false);
+  };
+
   const handleOpenDeleteLabel = (label) => {
     setLabelToDelete(label);
     setIsDeleteLabelOpen(true);
@@ -887,10 +977,10 @@ export default function ProjectAnnotatePage() {
     setLabelToDelete(null);
   };
 
-  const handleOpenDeleteImage = (image) => {
+  function handleOpenDeleteImage(image) {
     setImageToDelete(image);
     setIsDeleteImageOpen(true);
-  };
+  }
 
   const handleConfirmDeleteImage = async () => {
     if (!imageToDelete) {
@@ -1352,7 +1442,7 @@ export default function ProjectAnnotatePage() {
               <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
                 <p className="text-sm font-semibold text-slate-900">Auto-annotating</p>
                 <p className="mt-2 text-xs text-slate-500">
-                  Running model on project images...
+                  Running model on job images...
                 </p>
               </div>
             </div>
@@ -1366,13 +1456,23 @@ export default function ProjectAnnotatePage() {
               Projects
             </Link>
             <ChevronRight className="h-4 w-4 text-slate-400" />
+            <Link
+              href={`/projects/${params?.projectId}/jobs`}
+              className="text-sm text-slate-500 hover:text-slate-900"
+            >
+              Jobs
+            </Link>
+            <ChevronRight className="h-4 w-4 text-slate-400" />
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                 Annotation Workspace
               </p>
               <h1 className="text-lg font-semibold text-slate-900">
-                Project #1
+                {project?.name || `Project #${params?.projectId}`}
               </h1>
+              <p className="text-sm text-slate-500">
+                {activeJob?.name || "No job selected"}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -1384,18 +1484,21 @@ export default function ProjectAnnotatePage() {
               className="hidden"
               onChange={handleFilesSelected}
             />
-            <Button variant="outline" onClick={handleUploadClick} disabled={isUploading}>
+            <Button variant="outline" onClick={handleUploadClick} disabled={isUploading || !activeJobId}>
               {isUploading ? "Uploading..." : "Upload images"}
             </Button>
             <Button
               variant="secondary"
-              disabled={!hasAutoAnnotateConfig || isAutoAnnotating}
+              disabled={!activeJobId || !hasAutoAnnotateConfig || isAutoAnnotating}
               onClick={handleRunAutoAnnotate}
             >
               Auto annotate
             </Button>
+            <Button variant="outline" onClick={handleExportJob} disabled={isExporting || !activeJobId}>
+              {isExporting ? "Exporting..." : "Export job"}
+            </Button>
             <Button variant="outline" onClick={handleExportProject} disabled={isExporting}>
-              {isExporting ? "Exporting..." : "Export dataset"}
+              Export project
             </Button>
           </div>
         </header>
@@ -1574,7 +1677,9 @@ export default function ProjectAnnotatePage() {
               <div className="relative flex h-full w-full max-w-4xl items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
                 {!hasImages ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-4 text-center text-sm text-slate-500">
-                    No images available in this project. Please upload some.
+                    {activeJobId
+                      ? "No images available in this job. Please upload some."
+                      : "Create or select a job to start adding images."}
                   </div>
                 ) : (
                   <div

@@ -235,9 +235,68 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
-  uploadProjectImages: async (projectId, files) => {
+  fetchProjectJobs: async (projectId) => {
     set({ error: null });
-    if (!projectId || !files || files.length === 0) {
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/annotate/projects/${projectId}/jobs/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load jobs");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createProjectJob: async (projectId, payload) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/annotate/projects/${projectId}/jobs/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateJob: async (jobId, payload) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/annotate/jobs/${jobId}/`, payload);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteJob: async (jobId) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
+    }
+    try {
+      await apiClient.delete(`/api/annotate/jobs/${jobId}/`);
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadJobImages: async (jobId, files) => {
+    set({ error: null });
+    if (!jobId || !files || files.length === 0) {
       return { ok: false, error: "No images selected" };
     }
     try {
@@ -247,17 +306,10 @@ export const useApiStore = create((set) => ({
       });
 
       const response = await uploadClient.post(
-        `/api/annotate/projects/${projectId}/images/`,
+        `/api/annotate/jobs/${jobId}/images/`,
         formData,
       );
       const data = response.data;
-      set((state) => ({
-        projects: state.projects.map((project) =>
-          project.id === Number(projectId)
-            ? { ...project, images: data }
-            : project,
-        ),
-      }));
       return { ok: true, data };
     } catch (error) {
       const message = getApiErrorMessage(error, "Upload failed");
@@ -265,18 +317,44 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
-  fetchProjectImages: async (projectId) => {
+  fetchJobImages: async (jobId) => {
     set({ error: null });
-    if (!projectId) {
-      return { ok: false, error: "Missing project id" };
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
     }
     try {
       const response = await apiClient.get(
-        `/api/annotate/projects/${projectId}/images/`,
+        `/api/annotate/jobs/${jobId}/images/`,
       );
       return { ok: true, data: response.data };
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to load images");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  exportJob: async (jobId, onProgress) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/jobs/${jobId}/export/`,
+        {
+          responseType: "blob",
+          onDownloadProgress: (event) => {
+            if (!onProgress || !event.total) {
+              return;
+            }
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          },
+        },
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to export job");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -470,14 +548,14 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
-  runAutoAnnotate: async (projectId, payload) => {
+  runJobAutoAnnotate: async (jobId, payload) => {
     set({ error: null });
-    if (!projectId) {
-      return { ok: false, error: "Missing project id" };
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
     }
     try {
       const response = await apiClient.post(
-        `/api/annotate/projects/${projectId}/auto-annotate/run/`,
+        `/api/annotate/jobs/${jobId}/auto-annotate/run/`,
         payload || {},
       );
       return { ok: true, data: response.data };

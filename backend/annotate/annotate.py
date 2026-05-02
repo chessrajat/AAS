@@ -23,7 +23,7 @@ def get_auto_annotate_config(project, model_id=None):
     return config
 
 
-def run_auto_annotation(project, config):
+def run_auto_annotation(job, config):
     model_path = getattr(config.model.file, 'path', None)
     if not model_path or not os.path.exists(model_path):
         raise AutoAnnotateError("Model file is missing.")
@@ -35,9 +35,9 @@ def run_auto_annotation(project, config):
     if not mappings:
         raise AutoAnnotateError("No class mappings configured.")
 
-    images = list(project.images.all().order_by('id'))
+    images = list(job.images.all().order_by('id'))
     if not images:
-        raise AutoAnnotateError("No images available for this project.")
+        raise AutoAnnotateError("No images available for this job.")
 
     yolo = YOLO(model_path)
     total_images = 0

@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.db import models
 
 
@@ -65,10 +66,46 @@ class ProjectClass(models.Model):
         return f'{self.project.name}: {self.name}'
 
 
+class Job(models.Model):
+    STATUS_NEW = 'new'
+    STATUS_IN_PROGRESS = 'in_progress'
+    STATUS_DONE = 'done'
+    STATUS_CHOICES = [
+        (STATUS_NEW, 'New'),
+        (STATUS_IN_PROGRESS, 'In progress'),
+        (STATUS_DONE, 'Done'),
+    ]
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='jobs')
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_annotation_jobs',
+    )
+    assignees = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='annotation_jobs',
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['project', 'name'], name='unique_project_job_name'),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.project.name}: {self.name}'
+
+
 def project_image_upload_to(instance, filename):
     ext = filename.split('.')[-1] if '.' in filename else ''
     name = f"{uuid.uuid4()}.{ext}" if ext else f"{uuid.uuid4()}"
-    return f"projects/{instance.project_id}/images/{name}"
+    return f"projects/{instance.job.project_id}/jobs/{instance.job_id}/images/{name}"
 
 
 class Image(models.Model):
@@ -81,14 +118,14 @@ class Image(models.Model):
         (STATUS_DONE, 'Done'),
     ]
 
-    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='images')
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name='images')
     file = models.ImageField(upload_to=project_image_upload_to)
     width = models.PositiveIntegerField()
     height = models.PositiveIntegerField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
 
     def __str__(self) -> str:
-        return f'{self.project.name}: {self.file.name}'
+        return f'{self.job.project.name}/{self.job.name}: {self.file.name}'
 
 
 class Annotation(models.Model):
