@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'accounts.apps.AccountsConfig',
     'annotate.apps.AnnotateConfig',
+    'train.apps.TrainConfig',
 ]
 
 MIDDLEWARE = [

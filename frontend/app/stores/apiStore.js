@@ -9,11 +9,14 @@ export const useApiStore = create((set) => ({
   projects: [],
   models: [],
   users: [],
+  trainingPipelines: [],
   isLoadingProjects: false,
   isLoadingModels: false,
   isLoadingUsers: false,
+  isLoadingTrainingPipelines: false,
   isCreatingProject: false,
   isCreatingModel: false,
+  isCreatingTrainingPipeline: false,
   error: null,
   clearError: () => set({ error: null }),
   fetchProjects: async (token) => {
@@ -494,6 +497,207 @@ export const useApiStore = create((set) => ({
       return { ok: true };
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to delete project");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingPipelines: async () => {
+    set({ isLoadingTrainingPipelines: true, error: null });
+    try {
+      const response = await apiClient.get("/api/train/pipelines/");
+      const data = response.data;
+      set({ isLoadingTrainingPipelines: false, trainingPipelines: data });
+      return { ok: true, data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training pipelines");
+      set({ isLoadingTrainingPipelines: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingPipeline: async (payload) => {
+    set({ isCreatingTrainingPipeline: true, error: null });
+    try {
+      const response = await apiClient.post("/api/train/pipelines/", payload);
+      const data = response.data;
+      set((state) => ({
+        isCreatingTrainingPipeline: false,
+        trainingPipelines: [data, ...state.trainingPipelines],
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create training pipeline");
+      set({ isCreatingTrainingPipeline: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingPipeline: async (pipelineId) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/pipelines/${pipelineId}/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training pipeline");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingClass: async (pipelineId, payload) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/train/pipelines/${pipelineId}/classes/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create training class");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateTrainingClass: async (classId, payload) => {
+    set({ error: null });
+    if (!classId) {
+      return { ok: false, error: "Missing class id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/train/classes/${classId}/`, payload);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update training class");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteTrainingClass: async (classId) => {
+    set({ error: null });
+    if (!classId) {
+      return { ok: false, error: "Missing class id" };
+    }
+    try {
+      await apiClient.delete(`/api/train/classes/${classId}/`);
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete training class");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadTrainingItems: async (pipelineId, images, labels) => {
+    set({ error: null });
+    if (!pipelineId || !images || images.length === 0) {
+      return { ok: false, error: "No images selected" };
+    }
+    try {
+      const formData = new FormData();
+      Array.from(images).forEach((file) => formData.append("images", file));
+      Array.from(labels || []).forEach((file) => formData.append("labels", file));
+      const response = await uploadClient.post(
+        `/api/train/pipelines/${pipelineId}/items/upload/`,
+        formData,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Upload failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingItems: async (pipelineId) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/pipelines/${pipelineId}/items/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training items");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  applyTrainingSplit: async (pipelineId, payload) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/train/pipelines/${pipelineId}/apply-split/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to apply split");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingConfig: async (pipelineId, payload) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/train/pipelines/${pipelineId}/configs/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to save training configuration");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingConfigs: async (pipelineId) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/pipelines/${pipelineId}/configs/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training configurations");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingJob: async (pipelineId, configId) => {
+    set({ error: null });
+    if (!pipelineId || !configId) {
+      return { ok: false, error: "Missing training configuration" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/train/pipelines/${pipelineId}/jobs/`,
+        { config: configId },
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to queue training job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingJobs: async (pipelineId) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/pipelines/${pipelineId}/jobs/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training jobs");
       set({ error: message });
       return { ok: false, error: message };
     }

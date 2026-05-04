@@ -9,6 +9,7 @@ import {
   FolderKanban,
   LayoutGrid,
   LogOut,
+  Pickaxe,
   ShieldUser,
   UserCircle2,
 } from "lucide-react";
@@ -49,6 +50,7 @@ export default function HomeSidebar() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isProjects = pathname === "/" || pathname.startsWith("/projects/");
   const isModels = pathname === "/models";
+  const isTraining = pathname === "/training";
   const isUsers = pathname === "/users";
 
   useEffect(() => {
@@ -97,6 +99,14 @@ export default function HomeSidebar() {
                     <Link href="/models">
                       <Cpu />
                       <span>Models</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isTraining}>
+                    <Link href="/training">
+                      <Pickaxe />
+                      <span>Training</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
