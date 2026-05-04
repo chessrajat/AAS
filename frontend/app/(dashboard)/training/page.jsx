@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Play, Plus, RefreshCcw, Save, Trash2, Upload } from "lucide-react";
+import { Download, Play, Plus, RefreshCcw, Save, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import HomeSidebar from "../../components/HomeSidebar";
@@ -54,6 +54,8 @@ export default function TrainingPage() {
     fetchTrainingJobs,
     fetchTrainingPipeline,
     fetchTrainingPipelines,
+    downloadTrainingArtifact,
+    downloadTrainingJobArtifactsZip,
     isCreatingTrainingPipeline,
     isLoadingTrainingPipelines,
     trainingPipelines,
@@ -92,9 +94,19 @@ export default function TrainingPage() {
   const [selectedConfigId, setSelectedConfigId] = useState("");
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isQueueingJob, setIsQueueingJob] = useState(false);
+  const [selectedArtifactByJob, setSelectedArtifactByJob] = useState({});
+  const [downloadingArtifactKey, setDownloadingArtifactKey] = useState("");
 
   const splitTotal = Number(trainPercent) + Number(valPercent) + Number(testPercent);
   const latestJob = jobs[0];
+  const artifactTypeLabels = {
+    best_model: "Best model",
+    last_model: "Last model",
+    results: "Results",
+    confusion_matrix: "Confusion matrix",
+    log: "Log",
+    dataset_zip: "Dataset ZIP",
+  };
   const itemCounts = useMemo(() => {
     return items.reduce(
       (counts, item) => ({
@@ -363,6 +375,62 @@ export default function TrainingPage() {
 
   const setTrainingArg = (key, value) => {
     setTrainingArgs((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const getDownloadFilename = (headers, fallback) => {
+    const disposition = headers?.["content-disposition"];
+    const match = disposition?.match(/filename="?([^";]+)"?/i);
+    return match?.[1] || fallback;
+  };
+
+  const downloadBlob = (blob, filename) => {
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  };
+
+  const handleDownloadSelectedArtifact = async (job) => {
+    const artifacts = job.artifacts || [];
+    const artifactId = selectedArtifactByJob[job.id] || artifacts[0]?.id;
+    const artifact = artifacts.find((item) => String(item.id) === String(artifactId));
+    if (!artifact) {
+      toast.error("No artifact selected.");
+      return;
+    }
+    setDownloadingArtifactKey(`artifact-${artifact.id}`);
+    const result = await downloadTrainingArtifact(artifact.id);
+    setDownloadingArtifactKey("");
+    if (!result.ok) {
+      toast.error("Artifact download failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    downloadBlob(
+      result.data,
+      getDownloadFilename(result.headers, `training-artifact-${artifact.id}`),
+    );
+  };
+
+  const handleDownloadJobArtifactsZip = async (job) => {
+    setDownloadingArtifactKey(`job-${job.id}`);
+    const result = await downloadTrainingJobArtifactsZip(job.id);
+    setDownloadingArtifactKey("");
+    if (!result.ok) {
+      toast.error("Artifacts ZIP download failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    downloadBlob(
+      result.data,
+      getDownloadFilename(result.headers, `training-job-${job.id}-artifacts.zip`),
+    );
   };
 
   const handleSaveConfig = async () => {
@@ -872,11 +940,54 @@ export default function TrainingPage() {
                   ) : (
                     <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
                       {jobs.map((job) => (
-                        <div key={job.id} className="grid grid-cols-[90px_1fr_120px_120px] items-center border-b border-slate-200 px-4 py-3 text-sm last:border-b-0">
+                        <div key={job.id} className="grid gap-3 border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 lg:grid-cols-[70px_1fr_110px_100px_260px_220px] lg:items-center">
                           <span className="font-medium text-slate-900">#{job.id}</span>
                           <span className="text-slate-600">{job.config_detail?.name || "Config"}</span>
                           <Badge variant="secondary">{job.status}</Badge>
                           <span className="text-slate-500">{job.current_epoch}/{job.total_epochs || "?"}</span>
+                          <NativeSelect
+                            value={selectedArtifactByJob[job.id] || String(job.artifacts?.[0]?.id || "")}
+                            onChange={(event) =>
+                              setSelectedArtifactByJob((prev) => ({
+                                ...prev,
+                                [job.id]: event.target.value,
+                              }))
+                            }
+                            disabled={!job.artifacts?.length}
+                            className="h-9"
+                          >
+                            <NativeSelectOption value="">
+                              {job.artifacts?.length ? "Select artifact" : "No artifacts"}
+                            </NativeSelectOption>
+                            {(job.artifacts || []).map((artifact) => (
+                              <NativeSelectOption key={artifact.id} value={String(artifact.id)}>
+                                {artifactTypeLabels[artifact.artifact_type] || artifact.artifact_type}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDownloadSelectedArtifact(job)}
+                              disabled={
+                                !job.artifacts?.length ||
+                                downloadingArtifactKey === `artifact-${selectedArtifactByJob[job.id] || job.artifacts?.[0]?.id}`
+                              }
+                            >
+                              <Download className="h-4 w-4" />
+                              Artifact
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDownloadJobArtifactsZip(job)}
+                              disabled={!job.artifacts?.length || downloadingArtifactKey === `job-${job.id}`}
+                            >
+                              <Download className="h-4 w-4" />
+                              ZIP
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </div>

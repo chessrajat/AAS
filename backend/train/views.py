@@ -1,11 +1,14 @@
 from PIL import Image as PilImage, UnidentifiedImageError
 from django.core.files import File
+from django.core.files.storage import default_storage
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+import io
+import os
 import random
 import tempfile
 import zipfile
@@ -13,6 +16,7 @@ from pathlib import Path
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
+from django.http import FileResponse, Http404, HttpResponse
 from django.utils import timezone
 
 from accounts.models import UserProfile
@@ -20,6 +24,7 @@ from annotate.permissions import ALL_PROJECT_ROLES, HasAnnotateRolePermission
 
 from .models import (
     TrainingConfig,
+    TrainingArtifact,
     TrainingDatasetClass,
     TrainingDatasetItem,
     TrainingJob,
@@ -28,6 +33,7 @@ from .models import (
 )
 from .serializers import (
     TrainingConfigSerializer,
+    TrainingArtifactSerializer,
     TrainingDatasetClassSerializer,
     TrainingDatasetItemSerializer,
     TrainingJobSerializer,
@@ -84,6 +90,19 @@ def _is_safe_zip_member(member_name):
         and not path.is_absolute()
         and '..' not in path.parts
     )
+
+
+def _artifact_download_name(artifact):
+    filename = os.path.basename(artifact.file.name or '')
+    return filename or f'training-artifact-{artifact.id}'
+
+
+def _open_artifact_file(artifact):
+    if not artifact.file:
+        raise Http404('Artifact file not found.')
+    if not default_storage.exists(artifact.file.name):
+        raise Http404('Artifact file not found.')
+    return default_storage.open(artifact.file.name, 'rb')
 
 
 def pipeline_queryset():
@@ -404,8 +423,12 @@ class TrainingPipelineViewSet(viewsets.ModelViewSet):
         pipeline = self.get_object()
         if request.method.lower() == 'get':
             serializer = TrainingJobSerializer(
-                pipeline.jobs.select_related('config').all().order_by('-queued_at'),
+                pipeline.jobs.select_related('config')
+                .prefetch_related('artifacts')
+                .all()
+                .order_by('-queued_at'),
                 many=True,
+                context={'request': request},
             )
             return Response(serializer.data)
 
@@ -489,9 +512,90 @@ class TrainingDatasetItemViewSet(mixins.DestroyModelMixin, viewsets.GenericViewS
 
 
 class TrainingJobViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    queryset = TrainingJob.objects.select_related('pipeline', 'config').all()
+    queryset = (
+        TrainingJob.objects.select_related('pipeline', 'config')
+        .prefetch_related('artifacts')
+        .all()
+    )
     serializer_class = TrainingJobSerializer
     permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
     role_permissions = {
         'retrieve': ALL_PROJECT_ROLES,
+        'artifacts': ALL_PROJECT_ROLES,
+        'download_artifacts_zip': ALL_PROJECT_ROLES,
     }
+
+    @action(detail=True, methods=['get'], url_path='artifacts')
+    def artifacts(self, request, pk=None):
+        job = self.get_object()
+        serializer = TrainingArtifactSerializer(
+            job.artifacts.all(),
+            many=True,
+            context={'request': request},
+        )
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='artifacts/download-zip')
+    def download_artifacts_zip(self, request, pk=None):
+        job = self.get_object()
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+            used_names = set()
+            run_dir = Path(job.run_dir) if job.run_dir else None
+            if run_dir and run_dir.exists() and run_dir.is_dir():
+                for source_path in sorted(run_dir.rglob('*')):
+                    if not source_path.is_file():
+                        continue
+                    archive_name = str(source_path.relative_to(run_dir))
+                    used_names.add(archive_name)
+                    archive.write(source_path, archive_name)
+
+            if not used_names:
+                artifacts = list(job.artifacts.all().order_by('artifact_type', 'id'))
+                for artifact in artifacts:
+                    try:
+                        artifact_file = _open_artifact_file(artifact)
+                    except Http404:
+                        continue
+                    with artifact_file:
+                        base_name = _artifact_download_name(artifact)
+                        archive_name = f'{artifact.artifact_type}/{base_name}'
+                        if archive_name in used_names:
+                            stem, suffix = os.path.splitext(base_name)
+                            archive_name = f'{artifact.artifact_type}/{stem}-{artifact.id}{suffix}'
+                        used_names.add(archive_name)
+                        archive.writestr(archive_name, artifact_file.read())
+
+        if not used_names:
+            return Response(
+                {'detail': 'No artifact files are available for this training job.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        buffer.seek(0)
+        response = HttpResponse(buffer.getvalue(), content_type='application/zip')
+        response['Content-Disposition'] = (
+            f'attachment; filename="training-job-{job.id}-artifacts.zip"'
+        )
+        return response
+
+
+class TrainingArtifactViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+    queryset = TrainingArtifact.objects.select_related('job', 'job__pipeline').all()
+    serializer_class = TrainingArtifactSerializer
+    permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
+    role_permissions = {
+        'retrieve': ALL_PROJECT_ROLES,
+        'download': ALL_PROJECT_ROLES,
+    }
+
+    @action(detail=True, methods=['get'], url_path='download')
+    def download(self, request, pk=None):
+        artifact = self.get_object()
+        artifact_file = _open_artifact_file(artifact)
+        response = FileResponse(
+            artifact_file,
+            as_attachment=True,
+            filename=_artifact_download_name(artifact),
+        )
+        return response

@@ -97,6 +97,7 @@ class TrainingArtifactSerializer(serializers.ModelSerializer):
 
 class TrainingJobSerializer(serializers.ModelSerializer):
     config_detail = TrainingConfigSerializer(source='config', read_only=True)
+    artifacts = TrainingArtifactSerializer(many=True, read_only=True)
 
     class Meta:
         model = TrainingJob
@@ -118,6 +119,7 @@ class TrainingJobSerializer(serializers.ModelSerializer):
             'run_dir',
             'dataset_yaml_path',
             'final_args',
+            'artifacts',
         )
         read_only_fields = (
             'pipeline',

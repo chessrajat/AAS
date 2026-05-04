@@ -781,6 +781,70 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  fetchTrainingJobArtifacts: async (jobId) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing training job id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/jobs/${jobId}/artifacts/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training artifacts");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  downloadTrainingArtifact: async (artifactId, onProgress) => {
+    set({ error: null });
+    if (!artifactId) {
+      return { ok: false, error: "Missing training artifact id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/train/artifacts/${artifactId}/download/`,
+        {
+          responseType: "blob",
+          onDownloadProgress: (event) => {
+            if (!onProgress || !event.total) {
+              return;
+            }
+            onProgress(Math.round((event.loaded / event.total) * 100));
+          },
+        },
+      );
+      return { ok: true, data: response.data, headers: response.headers };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to download training artifact");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  downloadTrainingJobArtifactsZip: async (jobId, onProgress) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing training job id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/train/jobs/${jobId}/artifacts/download-zip/`,
+        {
+          responseType: "blob",
+          onDownloadProgress: (event) => {
+            if (!onProgress || !event.total) {
+              return;
+            }
+            onProgress(Math.round((event.loaded / event.total) * 100));
+          },
+        },
+      );
+      return { ok: true, data: response.data, headers: response.headers };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to download training artifacts");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
   fetchAutoAnnotateConfigs: async (projectId) => {
     set({ error: null });
     if (!projectId) {

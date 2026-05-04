@@ -61,7 +61,7 @@
   - results
   - confusion matrix
   - logs
-- [ ] Add artifact download API if direct media URLs are not enough.
+- [x] Add artifact download API if direct media URLs are not enough.
 
 ## API Hardening
 
