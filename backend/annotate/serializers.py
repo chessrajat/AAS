@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+from django.core.files.storage import default_storage
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from rest_framework import serializers
@@ -105,10 +106,50 @@ class AIModelSerializer(serializers.ModelSerializer):
 
 class ProjectSerializer(serializers.ModelSerializer):
     classes = ProjectClassSerializer(many=True, required=False)
+    job_count = serializers.SerializerMethodField()
+    first_job_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
-        fields = ('id', 'name', 'description', 'classes')
+        fields = (
+            'id',
+            'name',
+            'description',
+            'classes',
+            'job_count',
+            'first_job_image_url',
+        )
+
+    def get_job_count(self, obj):
+        annotated_count = getattr(obj, 'job_count', None)
+        if annotated_count is not None:
+            return annotated_count
+        return obj.jobs.count()
+
+    def get_first_job_image_url(self, obj):
+        request = self.context.get('request')
+        annotated_file = getattr(obj, 'first_job_image_file', None)
+        if annotated_file:
+            url = default_storage.url(annotated_file)
+            if request is None:
+                return url
+            return request.build_absolute_uri(url)
+
+        first_image = None
+
+        for job in obj.jobs.all():
+            images = list(job.images.all())
+            if images:
+                first_image = images[0]
+                break
+
+        if first_image is None:
+            return None
+        if not first_image.file:
+            return None
+        if request is None:
+            return first_image.file.url
+        return request.build_absolute_uri(first_image.file.url)
 
     def validate_classes(self, value):
         names = [item.get('name') for item in value if item.get('name') is not None]

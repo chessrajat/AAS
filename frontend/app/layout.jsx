@@ -2,6 +2,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ToasterClient from "./components/ToasterClient";
 import AuthGate from "./components/AuthGate";
+import ThemeProvider from "./components/ThemeProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,12 +26,14 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AuthGate>{children}</AuthGate>
-        <ToasterClient />
+        <ThemeProvider>
+          <AuthGate>{children}</AuthGate>
+          <ToasterClient />
+        </ThemeProvider>
       </body>
     </html>
   );

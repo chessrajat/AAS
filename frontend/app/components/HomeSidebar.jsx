@@ -4,13 +4,16 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
 import {
   ChevronUp,
   Cpu,
   FolderKanban,
   LogOut,
+  Moon,
   Pickaxe,
   ShieldUser,
+  Sun,
   UserCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -47,11 +50,18 @@ export default function HomeSidebar() {
     (state) => state.resolveUserManagementAccess,
   );
   const logoutWithApi = useAuthStore((state) => state.logoutWithApi);
+  const { resolvedTheme, setTheme } = useTheme();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isThemeMounted, setIsThemeMounted] = useState(false);
   const isProjects = pathname === "/" || pathname.startsWith("/projects/");
   const isModels = pathname === "/models";
   const isTraining = pathname === "/training";
   const isUsers = pathname === "/users";
+  const isDarkTheme = resolvedTheme === "dark";
+
+  useEffect(() => {
+    setIsThemeMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!accessToken || permissionsLoaded) {
@@ -69,6 +79,10 @@ export default function HomeSidebar() {
     setIsLoggingOut(false);
     toast.success("Logged out");
     router.replace("/login");
+  };
+
+  const handleThemeToggle = () => {
+    setTheme(isDarkTheme ? "light" : "dark");
   };
 
   return (
@@ -127,6 +141,18 @@ export default function HomeSidebar() {
         <SidebarSeparator />
         <SidebarFooter className="p-2">
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                type="button"
+                onClick={handleThemeToggle}
+                title={isDarkTheme ? "Switch to light theme" : "Switch to dark theme"}
+              >
+                {isThemeMounted && isDarkTheme ? <Sun /> : <Moon />}
+                <span>
+                  {isThemeMounted && isDarkTheme ? "Light theme" : "Dark theme"}
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

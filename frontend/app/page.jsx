@@ -30,6 +30,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+const dummyMembers = ["JC", "AI", "MI"];
+
+const formatCount = (count, singular, plural = `${singular}s`) => {
+  const value = Number(count) || 0;
+  return `${value} ${value === 1 ? singular : plural}`;
+};
+
 export default function Home() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const {
@@ -325,61 +332,99 @@ export default function Home() {
               </p>
             </Card>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {projects.map((project) => (
-                <div key={project.id} className="relative">
-                  <Link href={`/projects/${project.id}/jobs`} className="block">
-                    <Card className="border-border bg-card p-5 transition hover:border-foreground">
-                      <div className="space-y-2">
-                        <h2 className="text-lg font-semibold text-slate-900">
-                          {project.name}
-                        </h2>
-                        <p className="text-sm text-slate-500">
-                          {project.description || "No description"}
-                        </p>
-                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                          {project.classes?.length || 0} classes
-                        </p>
-                      </div>
-                    </Card>
-                  </Link>
-                  <div className="absolute right-3 top-3">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-slate-500 hover:text-slate-900"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleOpenEditProject(project);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                          Edit project
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleOpenDeleteProject(project);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete project
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {projects.map((project) => {
+                const projectImage = project.first_job_image_url;
+                const jobCount = project.job_count ?? project.jobs?.length ?? 0;
+                const classCount = project.classes?.length || 0;
+
+                return (
+                  <div key={project.id} className="relative">
+                    <Link href={`/projects/${project.id}/jobs`} className="block">
+                      <Card className="overflow-hidden border-border bg-card p-0 transition hover:border-foreground">
+                        <div className="aspect-[16/9] border-b border-border bg-muted">
+                          {projectImage ? (
+                            <div
+                              aria-hidden="true"
+                              className="h-full w-full bg-cover bg-center"
+                              style={{ backgroundImage: `url("${projectImage}")` }}
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-secondary text-xs font-medium uppercase text-muted-foreground">
+                              [ no image ]
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-4 p-4">
+                          <div className="pr-9">
+                            <h2 className="min-h-12 text-lg font-bold leading-tight text-slate-900">
+                              {project.name}
+                            </h2>
+                            <p className="mt-2 min-h-10 text-sm leading-5 text-slate-500">
+                              {project.description || "No description"}
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 border-y border-border py-3 text-xs text-muted-foreground">
+                            <span>{formatCount(jobCount, "job")}</span>
+                            <span>{formatCount(classCount, "class", "classes")}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="flex -space-x-2">
+                              {dummyMembers.map((member) => (
+                                <span
+                                  key={member}
+                                  className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-muted text-[10px] font-medium text-foreground"
+                                >
+                                  {member}
+                                </span>
+                              ))}
+                              <span className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-primary text-[10px] font-medium text-primary-foreground">
+                                +2
+                              </span>
+                            </div>
+                            <span className="text-xs text-muted-foreground">open</span>
+                          </div>
+                        </div>
+                      </Card>
+                    </Link>
+                    <div className="absolute right-3 top-3">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 bg-card/90 text-slate-500 hover:text-slate-900"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenEditProject(project);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Edit project
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenDeleteProject(project);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete project
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

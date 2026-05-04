@@ -10,7 +10,7 @@ import os
 import zipfile
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count
+from django.db.models import Count, OuterRef, Subquery
 from django.http import HttpResponse
 
 from .annotate import AutoAnnotateError, get_auto_annotate_config, run_auto_annotation
@@ -75,7 +75,20 @@ def build_yolo_export(project, images, filename_prefix):
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
-    queryset = Project.objects.prefetch_related('classes', 'jobs').all()
+    queryset = (
+        Project.objects
+        .prefetch_related('classes', 'jobs')
+        .annotate(
+            job_count=Count('jobs', distinct=True),
+            first_job_image_file=Subquery(
+                Image.objects
+                .filter(job__project=OuterRef('pk'))
+                .order_by('job_id', 'id')
+                .values('file')[:1]
+            ),
+        )
+        .all()
+    )
     serializer_class = ProjectSerializer
     permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
     role_permissions = {
