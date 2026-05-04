@@ -61,6 +61,12 @@ export default function ProjectJobsPage() {
       }
       if (projectResult.ok) {
         setProject(projectResult.data);
+      } else {
+        toast.error("Project unavailable", {
+          description: projectResult.error || "You do not have access to this project.",
+        });
+        router.replace("/");
+        return;
       }
       if (jobsResult.ok) {
         setJobs(jobsResult.data || []);
@@ -75,7 +81,7 @@ export default function ProjectJobsPage() {
     return () => {
       isMounted = false;
     };
-  }, [accessToken, projectId, fetchProject, fetchProjectJobs]);
+  }, [accessToken, projectId, fetchProject, fetchProjectJobs, router]);
 
   const handleCreateJob = async (event) => {
     event.preventDefault();

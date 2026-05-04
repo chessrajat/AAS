@@ -7,9 +7,48 @@ from django.db import models
 class Project(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        through='ProjectMembership',
+        through_fields=('project', 'user'),
+        blank=True,
+        related_name='annotation_projects',
+    )
 
     def __str__(self) -> str:
         return self.name
+
+
+class ProjectMembership(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='memberships',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='annotation_project_memberships',
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_annotation_project_memberships',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['project', 'user'],
+                name='unique_project_member',
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.project.name}: {self.user.username}'
 
 
 class AIModel(models.Model):

@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,11 +31,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const dummyMembers = ["JC", "AI", "MI"];
-
 const formatCount = (count, singular, plural = `${singular}s`) => {
   const value = Number(count) || 0;
   return `${value} ${value === 1 ? singular : plural}`;
+};
+
+const getUserInitials = (user) => {
+  const name = `${user?.first_name || ""} ${user?.last_name || ""}`.trim();
+  const source = name || user?.username || "U";
+  return source
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
 };
 
 export default function Home() {
@@ -43,7 +52,9 @@ export default function Home() {
     createProject,
     deleteProject,
     updateProject,
+    updateProjectUsers,
     fetchProjects,
+    fetchProjectAssignableUsers,
     isCreatingProject,
     isLoadingProjects,
     projects,
@@ -58,6 +69,9 @@ export default function Home() {
   const [projectToDelete, setProjectToDelete] = useState(null);
   const [projectToEdit, setProjectToEdit] = useState(null);
   const [editProjectName, setEditProjectName] = useState("");
+  const [editProjectUserIds, setEditProjectUserIds] = useState([]);
+  const [assignableProjectUsers, setAssignableProjectUsers] = useState([]);
+  const [isLoadingAssignableUsers, setIsLoadingAssignableUsers] = useState(false);
   const [isUpdatingProject, setIsUpdatingProject] = useState(false);
 
   const resetProjectForm = () => {
@@ -132,6 +146,35 @@ export default function Home() {
   const handleOpenEditProject = (project) => {
     setProjectToEdit(project);
     setEditProjectName(project.name || "");
+    setEditProjectUserIds((project.members || []).map((member) => member.id));
+    setAssignableProjectUsers(project.members || []);
+    setIsLoadingAssignableUsers(true);
+    fetchProjectAssignableUsers(project.id).then((result) => {
+      if (result.ok) {
+        setAssignableProjectUsers(result.data || []);
+      } else {
+        toast.error("Unable to load assignable users", {
+          description: result.error || "Please try again.",
+        });
+      }
+      setIsLoadingAssignableUsers(false);
+    });
+  };
+
+  const handleToggleEditProjectUser = (userId, checked) => {
+    setEditProjectUserIds((prev) => {
+      if (checked) {
+        return prev.includes(userId) ? prev : [...prev, userId];
+      }
+      return prev.filter((item) => item !== userId);
+    });
+  };
+
+  const closeEditProjectDialog = () => {
+    setProjectToEdit(null);
+    setEditProjectName("");
+    setEditProjectUserIds([]);
+    setAssignableProjectUsers([]);
   };
 
   const handleConfirmEditProject = async (event) => {
@@ -146,22 +189,53 @@ export default function Home() {
       return;
     }
 
+    const nextUserIds = editProjectUserIds;
+    if (nextUserIds.length === 0) {
+      toast.error("Assign at least one user to the project.");
+      return;
+    }
+
     setIsUpdatingProject(true);
     const result = await updateProject(projectToEdit.id, { name: nextName });
-    setIsUpdatingProject(false);
-
     if (!result.ok) {
+      setIsUpdatingProject(false);
       toast.error("Project update failed", {
         description: result.error || "Please try again.",
       });
       return;
     }
 
-    toast.success("Project renamed", {
+    const currentUserIds = (projectToEdit.members || [])
+      .map((member) => member.id)
+      .sort((a, b) => a - b);
+    const sortedNextUserIds = [...nextUserIds].sort((a, b) => a - b);
+    const usersChanged =
+      currentUserIds.length !== sortedNextUserIds.length ||
+      currentUserIds.some((userId, index) => userId !== sortedNextUserIds[index]);
+
+    if (usersChanged) {
+      const usersResult = await updateProjectUsers(projectToEdit.id, sortedNextUserIds);
+      if (!usersResult.ok) {
+        setIsUpdatingProject(false);
+        toast.error("Project users update failed", {
+          description: usersResult.error || "Please try again.",
+        });
+        return;
+      }
+      useApiStore.setState((state) => ({
+        projects: state.projects.map((project) =>
+          project.id === projectToEdit.id
+            ? { ...project, ...result.data, members: usersResult.data || [] }
+            : project,
+        ),
+      }));
+    }
+
+    setIsUpdatingProject(false);
+    toast.success("Project updated", {
       description: nextName,
     });
-    setProjectToEdit(null);
-    setEditProjectName("");
+    closeEditProjectDialog();
   };
 
   const handleOpenDeleteProject = (project) => {
@@ -337,6 +411,9 @@ export default function Home() {
                 const projectImage = project.first_job_image_url;
                 const jobCount = project.job_count ?? project.jobs?.length ?? 0;
                 const classCount = project.classes?.length || 0;
+                const members = project.members || [];
+                const visibleMembers = members.slice(0, 3);
+                const remainingMembers = Math.max(members.length - visibleMembers.length, 0);
 
                 return (
                   <div key={project.id} className="relative">
@@ -370,17 +447,20 @@ export default function Home() {
                           </div>
                           <div className="flex items-center justify-between">
                             <div className="flex -space-x-2">
-                              {dummyMembers.map((member) => (
+                              {visibleMembers.map((member) => (
                                 <span
-                                  key={member}
+                                  key={member.id}
                                   className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-muted text-[10px] font-medium text-foreground"
+                                  title={member.username}
                                 >
-                                  {member}
+                                  {getUserInitials(member)}
                                 </span>
                               ))}
-                              <span className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-primary text-[10px] font-medium text-primary-foreground">
-                                +2
-                              </span>
+                              {remainingMembers > 0 ? (
+                                <span className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-primary text-[10px] font-medium text-primary-foreground">
+                                  +{remainingMembers}
+                                </span>
+                              ) : null}
                             </div>
                             <span className="text-xs text-muted-foreground">open</span>
                           </div>
@@ -432,14 +512,13 @@ export default function Home() {
           open={Boolean(projectToEdit)}
           onOpenChange={(open) => {
             if (!open && !isUpdatingProject) {
-              setProjectToEdit(null);
-              setEditProjectName("");
+              closeEditProjectDialog();
             }
           }}
         >
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>Rename project</DialogTitle>
+              <DialogTitle>Edit project</DialogTitle>
             </DialogHeader>
             <form className="space-y-4" onSubmit={handleConfirmEditProject}>
               <div className="space-y-2">
@@ -452,15 +531,50 @@ export default function Home() {
                   autoFocus
                 />
               </div>
+              <div className="space-y-3">
+                <Label>Assigned users</Label>
+                <div className="max-h-64 overflow-y-auto border border-border">
+                  {isLoadingAssignableUsers ? (
+                    <p className="p-3 text-sm text-muted-foreground">Loading users...</p>
+                  ) : assignableProjectUsers.length === 0 ? (
+                    <p className="p-3 text-sm text-muted-foreground">No users available.</p>
+                  ) : (
+                    assignableProjectUsers.map((user) => {
+                      const isChecked = editProjectUserIds.includes(user.id);
+                      return (
+                        <label
+                          key={user.id}
+                          className="flex cursor-pointer items-center gap-3 border-b border-border p-3 last:border-b-0"
+                        >
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={(checked) =>
+                              handleToggleEditProjectUser(user.id, Boolean(checked))
+                            }
+                          />
+                          <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-foreground">
+                            {getUserInitials(user)}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-foreground">
+                              {user.username}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {user.email || user.role || "user"}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   disabled={isUpdatingProject}
-                  onClick={() => {
-                    setProjectToEdit(null);
-                    setEditProjectName("");
-                  }}
+                  onClick={closeEditProjectDialog}
                 >
                   Cancel
                 </Button>

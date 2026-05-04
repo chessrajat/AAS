@@ -27,6 +27,43 @@ class ProjectClassSerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'index', 'color')
 
 
+class ProjectUserSerializer(serializers.ModelSerializer):
+    role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = (
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'role',
+        )
+
+    def get_role(self, obj):
+        profile = getattr(obj, 'profile', None)
+        return getattr(profile, 'role', 'viewer')
+
+
+class ProjectUserAssignmentSerializer(serializers.Serializer):
+    user_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        allow_empty=False,
+    )
+
+    def validate_user_ids(self, value):
+        unique_ids = list(dict.fromkeys(value))
+        users = User.objects.filter(id__in=unique_ids, is_active=True)
+        found_ids = set(users.values_list('id', flat=True))
+        missing_ids = [user_id for user_id in unique_ids if user_id not in found_ids]
+        if missing_ids:
+            raise serializers.ValidationError(
+                f"Unknown or inactive users: {', '.join(str(item) for item in missing_ids)}."
+            )
+        return unique_ids
+
+
 class AIModelSerializer(serializers.ModelSerializer):
     classes = serializers.JSONField(read_only=True)
 
@@ -106,6 +143,7 @@ class AIModelSerializer(serializers.ModelSerializer):
 
 class ProjectSerializer(serializers.ModelSerializer):
     classes = ProjectClassSerializer(many=True, required=False)
+    members = ProjectUserSerializer(many=True, read_only=True)
     job_count = serializers.SerializerMethodField()
     first_job_image_url = serializers.SerializerMethodField()
 
@@ -116,6 +154,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             'name',
             'description',
             'classes',
+            'members',
             'job_count',
             'first_job_image_url',
         )

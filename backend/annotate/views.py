@@ -1,4 +1,5 @@
 from PIL import Image as PilImage, UnidentifiedImageError
+from django.contrib.auth import get_user_model
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -21,6 +22,7 @@ from .models import (
     Job,
     Project,
     ProjectClass,
+    ProjectMembership,
 )
 from .serializers import (
     AIModelSerializer,
@@ -29,9 +31,23 @@ from .serializers import (
     ImageSerializer,
     JobSerializer,
     ProjectClassSerializer,
+    ProjectUserAssignmentSerializer,
+    ProjectUserSerializer,
     ProjectSerializer,
 )
 from .permissions import ALL_PROJECT_ROLES, HasAnnotateRolePermission
+
+User = get_user_model()
+
+
+def user_can_bypass_project_membership(user):
+    return bool(user and user.is_authenticated and user.is_superuser)
+
+
+def filter_by_project_membership(queryset, user, project_lookup):
+    if user_can_bypass_project_membership(user):
+        return queryset
+    return queryset.filter(**{project_lookup: user}).distinct()
 
 
 def build_yolo_export(project, images, filename_prefix):
@@ -77,7 +93,7 @@ def build_yolo_export(project, images, filename_prefix):
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = (
         Project.objects
-        .prefetch_related('classes', 'jobs')
+        .prefetch_related('classes', 'jobs', 'members__profile')
         .annotate(
             job_count=Count('jobs', distinct=True),
             first_job_image_file=Subquery(
@@ -100,12 +116,31 @@ class ProjectViewSet(viewsets.ModelViewSet):
         'destroy': {'owner'},
         'jobs:GET': ALL_PROJECT_ROLES,
         'jobs:POST': {'owner', 'manager'},
+        'users:GET': ALL_PROJECT_ROLES,
+        'users:PUT': {'owner', 'manager'},
+        'users:PATCH': {'owner', 'manager'},
+        'assignable_users': {'owner', 'manager'},
         'add_class': {'owner', 'manager'},
         'export_project': {'owner', 'manager'},
         'auto_annotate_configs:GET': {'owner', 'manager'},
         'auto_annotate_configs:POST': {'owner', 'manager'},
         'auto_annotate_config_detail': {'owner', 'manager'},
     }
+
+    def get_queryset(self):
+        return filter_by_project_membership(
+            super().get_queryset(),
+            self.request.user,
+            'members',
+        )
+
+    def perform_create(self, serializer):
+        project = serializer.save()
+        ProjectMembership.objects.get_or_create(
+            project=project,
+            user=self.request.user,
+            defaults={'assigned_by': self.request.user},
+        )
 
     @action(detail=True, methods=['get', 'post'], url_path='jobs')
     def jobs(self, request, pk=None):
@@ -132,6 +167,53 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(JobSerializer(job, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'put', 'patch'], url_path='users')
+    def users(self, request, pk=None):
+        project = self.get_object()
+        if request.method.lower() == 'get':
+            users = project.members.select_related('profile').order_by('id')
+            return Response(ProjectUserSerializer(users, many=True).data)
+
+        serializer = ProjectUserAssignmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_ids = serializer.validated_data['user_ids']
+        if (
+            not user_can_bypass_project_membership(request.user)
+            and request.user.id not in user_ids
+        ):
+            return Response(
+                {'detail': 'You must keep yourself assigned to this project.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        users = list(User.objects.filter(id__in=user_ids, is_active=True))
+        with transaction.atomic():
+            project.memberships.exclude(user_id__in=user_ids).delete()
+            existing_user_ids = set(
+                project.memberships.values_list('user_id', flat=True)
+            )
+            ProjectMembership.objects.bulk_create(
+                [
+                    ProjectMembership(
+                        project=project,
+                        user=user,
+                        assigned_by=request.user,
+                    )
+                    for user in users
+                    if user.id not in existing_user_ids
+                ],
+                ignore_conflicts=True,
+            )
+
+        assigned_users = project.members.select_related('profile').order_by('id')
+        return Response(ProjectUserSerializer(assigned_users, many=True).data)
+
+    @action(detail=True, methods=['get'], url_path='assignable-users')
+    def assignable_users(self, request, pk=None):
+        self.get_object()
+        users = User.objects.filter(is_active=True).select_related('profile').order_by('id')
+        return Response(ProjectUserSerializer(users, many=True).data)
 
     @action(detail=True, methods=['post'], url_path='classes')
     def add_class(self, request, pk=None):
@@ -249,6 +331,13 @@ class JobViewSet(viewsets.ModelViewSet):
         'auto_annotate_run': {'owner', 'manager'},
     }
 
+    def get_queryset(self):
+        return filter_by_project_membership(
+            super().get_queryset(),
+            self.request.user,
+            'project__members',
+        )
+
     @action(
         detail=True,
         methods=['get', 'post'],
@@ -344,6 +433,13 @@ class ImageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
         'annotations:POST': {'owner', 'manager', 'annotator'},
     }
 
+    def get_queryset(self):
+        return filter_by_project_membership(
+            super().get_queryset(),
+            self.request.user,
+            'job__project__members',
+        )
+
     @action(detail=True, methods=['get', 'post'], url_path='annotations')
     def annotations(self, request, pk=None):
         image = self.get_object()
@@ -386,6 +482,13 @@ class AnnotationViewSet(
         'destroy': {'owner', 'manager', 'annotator'},
     }
 
+    def get_queryset(self):
+        return filter_by_project_membership(
+            super().get_queryset(),
+            self.request.user,
+            'image__job__project__members',
+        )
+
 
 class ProjectClassViewSet(
     mixins.DestroyModelMixin,
@@ -397,6 +500,13 @@ class ProjectClassViewSet(
     role_permissions = {
         'destroy': {'owner', 'manager'},
     }
+
+    def get_queryset(self):
+        return filter_by_project_membership(
+            super().get_queryset(),
+            self.request.user,
+            'project__members',
+        )
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()

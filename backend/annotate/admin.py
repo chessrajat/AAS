@@ -1,12 +1,19 @@
 from django.contrib import admin
 
-from .models import Annotation, Image, Job, Project, ProjectClass
+from .models import Annotation, Image, Job, Project, ProjectClass, ProjectMembership
+
+
+class ProjectMembershipInline(admin.TabularInline):
+    model = ProjectMembership
+    extra = 0
+    autocomplete_fields = ('user', 'assigned_by')
 
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
     list_display = ('id', 'name')
     search_fields = ('name',)
+    inlines = (ProjectMembershipInline,)
 
 
 @admin.register(ProjectClass)

@@ -252,6 +252,52 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  fetchProjectUsers: async (projectId) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/annotate/projects/${projectId}/users/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load project users");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchProjectAssignableUsers: async (projectId) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/projects/${projectId}/assignable-users/`,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load assignable users");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateProjectUsers: async (projectId, userIds) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/annotate/projects/${projectId}/users/`, {
+        user_ids: userIds,
+      });
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update project users");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
   createProjectJob: async (projectId, payload) => {
     set({ error: null });
     if (!projectId) {

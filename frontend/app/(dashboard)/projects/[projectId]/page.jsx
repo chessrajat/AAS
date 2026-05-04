@@ -253,6 +253,11 @@ export default function ProjectAnnotatePage() {
         if (result.data?.classes?.length && !activeLabelId) {
           setActiveLabelId(result.data.classes[0].id);
         }
+      } else {
+        toast.error("Project unavailable", {
+          description: result.error || "You do not have access to this project.",
+        });
+        router.replace("/");
       }
       setIsLoadingProject(false);
     };
@@ -261,7 +266,7 @@ export default function ProjectAnnotatePage() {
     return () => {
       isMounted = false;
     };
-  }, [accessToken, params?.projectId, fetchProject, activeLabelId]);
+  }, [accessToken, params?.projectId, fetchProject, activeLabelId, router]);
 
   useEffect(() => {
     if (!accessToken || !params?.projectId) {
