@@ -2,15 +2,15 @@
 
 ## Dataset Upload And Import
 
-- [ ] Add ZIP dataset upload endpoint: `POST /api/train/pipelines/{id}/items/upload-zip/`.
-- [ ] Support ZIP layout:
+- [x] Add ZIP dataset upload endpoint: `POST /api/train/pipelines/{id}/items/upload-zip/`.
+- [x] Support ZIP layout:
   - `images/*.jpg|jpeg|png`
   - `labels/*.txt`
-- [ ] Match images and labels by filename stem.
-- [ ] Reject unsafe ZIP paths such as absolute paths or `../`.
-- [ ] Extract uploaded ZIP to a temporary import directory.
-- [ ] Create `TrainingDatasetItem` records from extracted files.
-- [ ] Keep current multi-file upload endpoint for small batches.
+- [x] Match images and labels by filename stem.
+- [x] Reject unsafe ZIP paths such as absolute paths or `../`.
+- [x] Extract uploaded ZIP to a temporary import directory.
+- [x] Create `TrainingDatasetItem` records from extracted files.
+- [x] Keep current multi-file upload endpoint for small batches.
 - [ ] Add dataset import status model if ZIP imports become slow:
   - `pending`
   - `running`
@@ -57,7 +57,7 @@
 - [x] Parse epoch metrics into `TrainingEpochMetric`.
 - [x] Save model artifacts into `TrainingArtifact`:
   - best model
-  - last model
+  - last modeldo we have a way to store files in s3 compatable object storage
   - results
   - confusion matrix
   - logs

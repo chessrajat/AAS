@@ -59,6 +59,7 @@ export default function TrainingPage() {
     trainingPipelines,
     updateTrainingClass,
     uploadTrainingItems,
+    uploadTrainingZip,
   } = useApiStore();
 
   const [isPipelineDialogOpen, setIsPipelineDialogOpen] = useState(false);
@@ -77,7 +78,9 @@ export default function TrainingPage() {
   const [jobs, setJobs] = useState([]);
   const [imageFiles, setImageFiles] = useState(null);
   const [labelFiles, setLabelFiles] = useState(null);
+  const [zipFile, setZipFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingZip, setIsUploadingZip] = useState(false);
   const [trainPercent, setTrainPercent] = useState(80);
   const [valPercent, setValPercent] = useState(10);
   const [testPercent, setTestPercent] = useState(10);
@@ -301,6 +304,31 @@ export default function TrainingPage() {
     });
     setImageFiles(null);
     setLabelFiles(null);
+    await refreshActivePipeline();
+  };
+
+  const handleUploadZip = async () => {
+    if (!activePipelineId) {
+      toast.error("Select a training pipeline first.");
+      return;
+    }
+    if (!zipFile) {
+      toast.error("Select a ZIP archive first.");
+      return;
+    }
+    setIsUploadingZip(true);
+    const result = await uploadTrainingZip(activePipelineId, zipFile);
+    setIsUploadingZip(false);
+    if (!result.ok) {
+      toast.error("ZIP upload failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    toast.success("Dataset ZIP uploaded", {
+      description: `${result.data.length} image(s) added.`,
+    });
+    setZipFile(null);
     await refreshActivePipeline();
   };
 
@@ -692,6 +720,23 @@ export default function TrainingPage() {
                       <Button onClick={handleUploadItems} disabled={isUploading}>
                         <Upload />
                         {isUploading ? "Uploading..." : "Upload"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto]">
+                    <div className="space-y-2">
+                      <Label htmlFor="training-zip">Dataset ZIP</Label>
+                      <Input
+                        id="training-zip"
+                        type="file"
+                        accept=".zip,application/zip,application/x-zip-compressed"
+                        onChange={(event) => setZipFile(event.target.files?.[0] || null)}
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button variant="secondary" onClick={handleUploadZip} disabled={isUploadingZip}>
+                        <Upload />
+                        {isUploadingZip ? "Uploading..." : "Upload ZIP"}
                       </Button>
                     </div>
                   </div>

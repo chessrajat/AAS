@@ -1,4 +1,5 @@
 from PIL import Image as PilImage, UnidentifiedImageError
+from django.core.files import File
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -6,6 +7,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 import random
+import tempfile
+import zipfile
+from pathlib import Path
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
@@ -36,6 +40,50 @@ MANAGE_TRAINING_ROLES = {
     UserProfile.Role.OWNER,
     UserProfile.Role.MANAGER,
 }
+
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+
+
+def _stem_from_name(name):
+    return Path(name).stem
+
+
+def _create_training_item(pipeline, image_file, label_file=None, image_name=None, label_name=''):
+    validation_errors = []
+    try:
+        with PilImage.open(image_file) as opened_image:
+            width, height = opened_image.size
+    except (UnidentifiedImageError, OSError):
+        raise ValueError(f'Invalid image file: {image_name or getattr(image_file, "name", "unknown")}.')
+
+    if label_file is None:
+        validation_errors.append('Matching label file not found.')
+
+    if hasattr(image_file, 'seek'):
+        image_file.seek(0)
+    if label_file is not None and hasattr(label_file, 'seek'):
+        label_file.seek(0)
+
+    return TrainingDatasetItem.objects.create(
+        pipeline=pipeline,
+        image=image_file,
+        label=label_file,
+        original_image_name=image_name or getattr(image_file, 'name', ''),
+        original_label_name=label_name or (getattr(label_file, 'name', '') if label_file else ''),
+        width=width,
+        height=height,
+        validation_errors=validation_errors,
+    )
+
+
+def _is_safe_zip_member(member_name):
+    normalized_name = member_name.replace('\\', '/')
+    path = Path(normalized_name)
+    return (
+        member_name
+        and not path.is_absolute()
+        and '..' not in path.parts
+    )
 
 
 def pipeline_queryset():
@@ -72,6 +120,7 @@ class TrainingPipelineViewSet(viewsets.ModelViewSet):
         'classes:POST': MANAGE_TRAINING_ROLES,
         'items': ALL_PROJECT_ROLES,
         'upload_items': MANAGE_TRAINING_ROLES,
+        'upload_zip': MANAGE_TRAINING_ROLES,
         'split_config:GET': ALL_PROJECT_ROLES,
         'split_config:PUT': MANAGE_TRAINING_ROLES,
         'apply_split': MANAGE_TRAINING_ROLES,
@@ -141,44 +190,135 @@ class TrainingPipelineViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        labels_by_stem = {
-            label.name.rsplit('.', 1)[0]: label
-            for label in labels
-        }
+        labels_by_stem = {_stem_from_name(label.name): label for label in labels}
         created = []
         with transaction.atomic():
             for image_file in images:
-                image_stem = image_file.name.rsplit('.', 1)[0]
+                image_stem = _stem_from_name(image_file.name)
                 label_file = labels_by_stem.get(image_stem)
-                validation_errors = []
                 try:
-                    with PilImage.open(image_file) as opened_image:
-                        width, height = opened_image.size
-                except (UnidentifiedImageError, OSError):
+                    created.append(
+                        _create_training_item(
+                            pipeline,
+                            image_file,
+                            label_file=label_file,
+                            image_name=image_file.name,
+                            label_name=label_file.name if label_file else '',
+                        )
+                    )
+                except ValueError as exc:
                     return Response(
-                        {'detail': f'Invalid image file: {image_file.name}.'},
+                        {'detail': str(exc)},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        serializer = TrainingDatasetItemSerializer(
+            created,
+            many=True,
+            context={'request': request},
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='items/upload-zip',
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_zip(self, request, pk=None):
+        pipeline = self.get_object()
+        archive = request.FILES.get('archive')
+        if not archive:
+            return Response(
+                {'detail': 'No archive provided.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created = []
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                archive_path = temp_path / 'dataset.zip'
+                with archive_path.open('wb') as destination:
+                    for chunk in archive.chunks():
+                        destination.write(chunk)
+
+                try:
+                    with zipfile.ZipFile(archive_path) as zip_file:
+                        members = zip_file.infolist()
+                        unsafe = [
+                            member.filename
+                            for member in members
+                            if not _is_safe_zip_member(member.filename)
+                        ]
+                        if unsafe:
+                            return Response(
+                                {'detail': 'Archive contains unsafe paths.'},
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+                        zip_file.extractall(temp_path / 'extracted')
+                except zipfile.BadZipFile:
+                    return Response(
+                        {'detail': 'Invalid ZIP archive.'},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-                if label_file is None:
-                    validation_errors.append('Matching label file not found.')
+                extracted_dir = temp_path / 'extracted'
+                image_paths = [
+                    path
+                    for path in extracted_dir.rglob('*')
+                    if path.is_file()
+                    and path.suffix.lower() in IMAGE_EXTENSIONS
+                    and 'images' in path.relative_to(extracted_dir).parts
+                ]
+                label_paths = [
+                    path
+                    for path in extracted_dir.rglob('*.txt')
+                    if path.is_file()
+                    and 'labels' in path.relative_to(extracted_dir).parts
+                ]
+                labels_by_stem = {path.stem: path for path in label_paths}
 
-                image_file.seek(0)
-                if label_file is not None and hasattr(label_file, 'seek'):
-                    label_file.seek(0)
-
-                created.append(
-                    TrainingDatasetItem.objects.create(
-                        pipeline=pipeline,
-                        image=image_file,
-                        label=label_file,
-                        original_image_name=image_file.name,
-                        original_label_name=label_file.name if label_file else '',
-                        width=width,
-                        height=height,
-                        validation_errors=validation_errors,
+                if not image_paths:
+                    return Response(
+                        {'detail': 'Archive contains no images under an images/ folder.'},
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
-                )
+
+                with transaction.atomic():
+                    for image_path in sorted(image_paths):
+                        label_path = labels_by_stem.get(image_path.stem)
+                        try:
+                            with image_path.open('rb') as image_file:
+                                image_django_file = File(image_file, name=image_path.name)
+                                if label_path:
+                                    with label_path.open('rb') as label_file:
+                                        label_django_file = File(label_file, name=label_path.name)
+                                        created.append(
+                                            _create_training_item(
+                                                pipeline,
+                                                image_django_file,
+                                                label_file=label_django_file,
+                                                image_name=image_path.name,
+                                                label_name=label_path.name,
+                                            )
+                                        )
+                                else:
+                                    created.append(
+                                        _create_training_item(
+                                            pipeline,
+                                            image_django_file,
+                                            image_name=image_path.name,
+                                        )
+                                    )
+                        except ValueError as exc:
+                            return Response(
+                                {'detail': str(exc)},
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+        finally:
+            if hasattr(archive, 'seek'):
+                archive.seek(0)
+
         serializer = TrainingDatasetItemSerializer(
             created,
             many=True,

@@ -609,6 +609,25 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  uploadTrainingZip: async (pipelineId, archive) => {
+    set({ error: null });
+    if (!pipelineId || !archive) {
+      return { ok: false, error: "No ZIP archive selected" };
+    }
+    try {
+      const formData = new FormData();
+      formData.append("archive", archive);
+      const response = await uploadClient.post(
+        `/api/train/pipelines/${pipelineId}/items/upload-zip/`,
+        formData,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "ZIP upload failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
   fetchTrainingItems: async (pipelineId) => {
     set({ error: null });
     if (!pipelineId) {
