@@ -431,6 +431,7 @@ class ImageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
         'destroy': {'owner', 'manager'},
         'annotations:GET': ALL_PROJECT_ROLES,
         'annotations:POST': {'owner', 'manager', 'annotator'},
+        'mark_done': {'owner', 'manager', 'annotator'},
     }
 
     def get_queryset(self):
@@ -457,10 +458,21 @@ class ImageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         annotation = serializer.save(image=image)
+        if image.status != Image.STATUS_IN_PROGRESS:
+            image.status = Image.STATUS_IN_PROGRESS
+            image.save(update_fields=['status'])
         return Response(
             AnnotationSerializer(annotation).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=['post'], url_path='mark-done')
+    def mark_done(self, request, pk=None):
+        image = self.get_object()
+        if image.status != Image.STATUS_DONE:
+            image.status = Image.STATUS_DONE
+            image.save(update_fields=['status'])
+        return Response(ImageSerializer(image, context={'request': request}).data)
 
     def destroy(self, request, *args, **kwargs):
         image = self.get_object()
@@ -489,6 +501,20 @@ class AnnotationViewSet(
             'image__job__project__members',
         )
 
+    def perform_update(self, serializer):
+        annotation = serializer.save()
+        image = annotation.image
+        if image.status != Image.STATUS_IN_PROGRESS:
+            image.status = Image.STATUS_IN_PROGRESS
+            image.save(update_fields=['status'])
+
+    def perform_destroy(self, instance):
+        image = instance.image
+        instance.delete()
+        if image.status != Image.STATUS_IN_PROGRESS:
+            image.status = Image.STATUS_IN_PROGRESS
+            image.save(update_fields=['status'])
+
 
 class ProjectClassViewSet(
     mixins.DestroyModelMixin,
@@ -510,7 +536,12 @@ class ProjectClassViewSet(
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        image_ids = list(
+            Annotation.objects.filter(project_class=instance).values_list('image_id', flat=True)
+        )
         Annotation.objects.filter(project_class=instance).delete()
+        if image_ids:
+            Image.objects.filter(id__in=image_ids).update(status=Image.STATUS_IN_PROGRESS)
         return super().destroy(request, *args, **kwargs)
 
 

@@ -510,6 +510,20 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  markImageDone: async (imageId) => {
+    set({ error: null });
+    if (!imageId) {
+      return { ok: false, error: "Missing image id" };
+    }
+    try {
+      const response = await apiClient.post(`/api/annotate/images/${imageId}/mark-done/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to mark image done");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
   updateProject: async (projectId, payload) => {
     set({ error: null });
     if (!projectId) {

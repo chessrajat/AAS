@@ -2,7 +2,7 @@ import os
 
 from ultralytics import YOLO
 
-from .models import Annotation, AutoAnnotateConfig
+from .models import Annotation, AutoAnnotateConfig, Image
 
 
 class AutoAnnotateError(Exception):
@@ -54,6 +54,9 @@ def run_auto_annotation(job, config):
         result = results[0]
         boxes = result.boxes
         Annotation.objects.filter(image=image).delete()
+        if image.status != Image.STATUS_IN_PROGRESS:
+            image.status = Image.STATUS_IN_PROGRESS
+            image.save(update_fields=['status'])
 
         if boxes is None or boxes.cls is None or boxes.xyxy is None:
             total_images += 1

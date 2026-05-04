@@ -285,7 +285,7 @@ export default function Home() {
             }}
           >
             <DialogTrigger asChild>
-              <Button variant="default">New Project</Button>
+              <Button variant="default" className="cursor-pointer">New Project</Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
               <DialogHeader>

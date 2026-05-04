@@ -94,7 +94,6 @@ export default function HomeSidebar() {
             <span className="group-data-[collapsible=icon]:hidden">AAS</span>
           </div>
         </SidebarHeader>
-        <SidebarSeparator />
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupLabel>Workspace</SidebarGroupLabel>

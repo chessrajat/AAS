@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
+  CheckCircle,
   Crosshair,
   Hand,
   Minus,
@@ -18,11 +19,9 @@ import HomeSidebar from "../../../components/HomeSidebar";
 import { useAuthStore } from "../../../stores/authStore";
 import { useApiStore } from "../../../stores/apiStore";
 import { toast } from "sonner";
+import AnnotationSidebar from "./components/AnnotationSidebar";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
@@ -76,6 +75,7 @@ export default function ProjectAnnotatePage() {
     createAutoAnnotateConfig,
     updateAutoAnnotateConfig,
     runJobAutoAnnotate,
+    markImageDone,
   } = useApiStore();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -96,6 +96,7 @@ export default function ProjectAnnotatePage() {
   const [project, setProject] = useState(null);
   const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [annotations, setAnnotations] = useState([]);
+  const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState([]);
   const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false);
   const [activeTool, setActiveTool] = useState("draw");
   const [activeLabelId, setActiveLabelId] = useState(null);
@@ -117,6 +118,7 @@ export default function ProjectAnnotatePage() {
   const [autoAnnotateConfigs, setAutoAnnotateConfigs] = useState([]);
   const [isSavingAutoAnnotate, setIsSavingAutoAnnotate] = useState(false);
   const [isAutoAnnotating, setIsAutoAnnotating] = useState(false);
+  const [isMarkingImageDone, setIsMarkingImageDone] = useState(false);
   const [isSavingLabel, setIsSavingLabel] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
@@ -146,6 +148,10 @@ export default function ProjectAnnotatePage() {
   const hasLabels = projectLabels.length > 0;
   const activeLabel = projectLabels.find((label) => label.id === activeLabelId);
   const annotationCount = annotations.length;
+  const hiddenAnnotationIdSet = useMemo(
+    () => new Set(hiddenAnnotationIds),
+    [hiddenAnnotationIds],
+  );
   const keyboardShortcuts = [
     { key: "D", description: "Switch to Draw bounding box tool." },
     { key: "S", description: "Switch to Select/Move tool." },
@@ -156,6 +162,12 @@ export default function ProjectAnnotatePage() {
     { key: "Space (hold)", description: "Temporarily switch to Pan tool." },
     { key: "Delete", description: "Delete selected annotation." },
   ];
+
+  const imageStatusLabels = {
+    new: "New",
+    in_progress: "In progress",
+    done: "Done",
+  };
 
   useEffect(() => {
     if (!accessToken) {
@@ -378,11 +390,16 @@ export default function ProjectAnnotatePage() {
         setAnnotations(annotationsResult.data || []);
       }
     }
+    const imagesResult = await fetchJobImages(activeJobId);
+    if (imagesResult.ok) {
+      setImages(imagesResult.data || []);
+    }
   };
 
   useEffect(() => {
     if (!activeImage?.id) {
       setAnnotations([]);
+      setHiddenAnnotationIds([]);
       return;
     }
 
@@ -395,6 +412,7 @@ export default function ProjectAnnotatePage() {
       }
       if (result.ok) {
         setAnnotations(result.data || []);
+        setHiddenAnnotationIds([]);
       }
       setIsLoadingAnnotations(false);
     };
@@ -592,12 +610,19 @@ export default function ProjectAnnotatePage() {
       setAnnotations((prev) =>
         prev.filter((annotation) => annotation.id !== selectedAnnotationId),
       );
+      if (activeImage?.id) {
+        setImages((prev) =>
+          prev.map((image) =>
+            image.id === activeImage.id ? { ...image, status: "in_progress" } : image,
+          ),
+        );
+      }
       setSelectedAnnotationId(null);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [deleteAnnotation, selectedAnnotationId]);
+  }, [activeImage?.id, deleteAnnotation, selectedAnnotationId]);
 
   useEffect(() => {
     if (!selectedAnnotationId) {
@@ -660,6 +685,17 @@ export default function ProjectAnnotatePage() {
     return imageMeta.displayWidth / imageMeta.naturalWidth;
   };
 
+  const updateActiveImageStatus = (status) => {
+    if (!activeImage?.id) {
+      return;
+    }
+    setImages((prev) =>
+      prev.map((image) =>
+        image.id === activeImage.id ? { ...image, status } : image,
+      ),
+    );
+  };
+
   const toDisplayBox = (annotation) => {
     const scale = getImageScale();
     return {
@@ -668,6 +704,70 @@ export default function ProjectAnnotatePage() {
       w: Math.round((annotation.x_max - annotation.x_min) * scale),
       h: Math.round((annotation.y_max - annotation.y_min) * scale),
     };
+  };
+
+  const handleDeleteAnnotation = async (annotationId) => {
+    const result = await deleteAnnotation(annotationId);
+    if (!result.ok) {
+      toast.error("Delete failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    setAnnotations((prev) =>
+      prev.filter((annotation) => annotation.id !== annotationId),
+    );
+    updateActiveImageStatus("in_progress");
+    setHiddenAnnotationIds((prev) => prev.filter((item) => item !== annotationId));
+    if (selectedAnnotationId === annotationId) {
+      setSelectedAnnotationId(null);
+    }
+  };
+
+  const handleToggleAnnotationVisibility = (annotationId) => {
+    setHiddenAnnotationIds((prev) =>
+      prev.includes(annotationId)
+        ? prev.filter((item) => item !== annotationId)
+        : [...prev, annotationId],
+    );
+  };
+
+  const handleSelectSidebarAnnotation = (annotationId) => {
+    setSelectedAnnotationId(annotationId);
+    setActiveTool("select");
+  };
+
+  const handleSidebarLabelClick = async (label) => {
+    if (activeTool === "select" && selectedAnnotationId) {
+      const selected = getAnnotationById(selectedAnnotationId);
+      if (!selected) {
+        return;
+      }
+      const payload = {
+        project_class: label.id,
+        x_min: selected.x_min,
+        y_min: selected.y_min,
+        x_max: selected.x_max,
+        y_max: selected.y_max,
+      };
+      const result = await updateAnnotation(selectedAnnotationId, payload);
+      if (!result.ok) {
+        toast.error("Update failed", {
+          description: result.error || "Please try again.",
+        });
+        return;
+      }
+      setAnnotations((prev) =>
+        prev.map((annotation) =>
+          annotation.id === selectedAnnotationId
+            ? { ...annotation, project_class: label.id }
+            : annotation,
+        ),
+      );
+      updateActiveImageStatus("in_progress");
+      return;
+    }
+    setActiveLabelId(label.id);
   };
 
   const getAnnotationById = (annotationId) =>
@@ -700,6 +800,9 @@ export default function ProjectAnnotatePage() {
     }
     for (let i = annotations.length - 1; i >= 0; i -= 1) {
       const annotation = annotations[i];
+      if (hiddenAnnotationIdSet.has(annotation.id)) {
+        continue;
+      }
       const box = toDisplayBox(annotation);
       if (
         pos.x >= box.x &&
@@ -725,6 +828,9 @@ export default function ProjectAnnotatePage() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     annotations.forEach((annotation) => {
+      if (hiddenAnnotationIdSet.has(annotation.id)) {
+        return;
+      }
       const label = projectLabels.find((item) => item.id === annotation.project_class);
       const displayBox = toDisplayBox(annotation);
       const color = label?.color || "#3b82f6";
@@ -743,7 +849,7 @@ export default function ProjectAnnotatePage() {
 
     if (selectedAnnotationId) {
       const selected = getAnnotationById(selectedAnnotationId);
-      if (selected) {
+      if (selected && !hiddenAnnotationIdSet.has(selected.id)) {
         const displayBox = toDisplayBox(selected);
         const handles = getHandlePositions(displayBox);
         ctx.fillStyle = "#0f172a";
@@ -763,6 +869,7 @@ export default function ProjectAnnotatePage() {
     imageMeta.displayHeight,
     projectLabels,
     selectedAnnotationId,
+    hiddenAnnotationIdSet,
   ]);
 
   const handleUploadClick = () => {
@@ -1007,6 +1114,28 @@ export default function ProjectAnnotatePage() {
     setAnnotations([]);
     setIsDeleteImageOpen(false);
     setImageToDelete(null);
+  };
+
+  const handleMarkImageDone = async () => {
+    if (!activeImage?.id) {
+      return;
+    }
+    setIsMarkingImageDone(true);
+    const result = await markImageDone(activeImage.id);
+    setIsMarkingImageDone(false);
+    if (!result.ok) {
+      toast.error("Unable to mark done", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    setImages((prev) =>
+      prev.map((image) =>
+        image.id === activeImage.id ? result.data : image,
+      ),
+    );
+    toast.success("Image marked done.");
+    setActiveIndex((prev) => Math.min(prev + 1, images.length - 1));
   };
 
   const openLabelDialog = () => {
@@ -1319,6 +1448,8 @@ export default function ProjectAnnotatePage() {
           toast.error("Update failed", {
             description: result.error || "Please try again.",
           });
+        } else {
+          updateActiveImageStatus("in_progress");
         }
       }
       return;
@@ -1340,6 +1471,8 @@ export default function ProjectAnnotatePage() {
           toast.error("Update failed", {
             description: result.error || "Please try again.",
           });
+        } else {
+          updateActiveImageStatus("in_progress");
         }
       }
       return;
@@ -1400,6 +1533,7 @@ export default function ProjectAnnotatePage() {
       return;
     }
     setAnnotations((prev) => [...prev, result.data]);
+    updateActiveImageStatus("in_progress");
   };
 
   const handleImageLoad = (event) => {
@@ -1648,6 +1782,11 @@ export default function ProjectAnnotatePage() {
                 </div>
                 <span>{imageName}</span>
                 {hasImages ? (
+                  <Badge variant={activeImage?.status === "done" ? "default" : "outline"}>
+                    {imageStatusLabels[activeImage?.status] || activeImage?.status || "New"}
+                  </Badge>
+                ) : null}
+                {hasImages ? (
                   <Button
                     size="icon"
                     variant="ghost"
@@ -1739,245 +1878,34 @@ export default function ProjectAnnotatePage() {
             </div>
           </div>
 
-          <aside className="flex h-full w-full max-w-sm min-h-0 flex-col border-l border-border bg-background pb-10">
-            <Tabs defaultValue="objects" className="flex h-full min-h-0 flex-col">
-              <TabsList className="grid w-full grid-cols-2 rounded-none bg-muted">
-                <TabsTrigger value="objects">Objects</TabsTrigger>
-                <TabsTrigger value="labels">Labels</TabsTrigger>
-              </TabsList>
-              <TabsContent value="objects" className="flex-1 min-h-0 overflow-hidden">
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="space-y-3 border-b border-border p-4">
-                    <Input placeholder="Search frames or IDs" className="bg-background" />
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{annotationCount} active</Badge>
-                      <Badge variant="outline">0 pending</Badge>
-                    </div>
-                  </div>
-                  <ScrollArea className="flex-1 min-h-0">
-                    <div className="space-y-3 p-4">
-                      {annotations.length === 0 ? (
-                        <Card className="border-border bg-muted p-3 text-sm text-muted-foreground">
-                          {isLoadingAnnotations
-                            ? "Loading annotations..."
-                            : "No annotations yet for this image."}
-                        </Card>
-                      ) : (
-                        annotations.map((annotation) => {
-                          const label = projectLabels.find(
-                            (item) => item.id === annotation.project_class,
-                          );
-                          const width = annotation.x_max - annotation.x_min;
-                          const height = annotation.y_max - annotation.y_min;
-                          const labelColor = label?.color || "#3b82f6";
-                          return (
-                            <Card
-                              key={annotation.id}
-                              className={`border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-sm ${
-                                selectedAnnotationId === annotation.id
-                                  ? "ring-2 ring-slate-900 ring-offset-1"
-                                  : ""
-                              }`}
-                              onClick={() => {
-                                setSelectedAnnotationId(annotation.id);
-                                setActiveTool("select");
-                              }}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  setSelectedAnnotationId(annotation.id);
-                                  setActiveTool("select");
-                                }
-                              }}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span>Annotation #{annotation.id}</span>
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="secondary">
-                                    {label?.name || "Unlabeled"}
-                                  </Badge>
-                                  {selectedAnnotationId === annotation.id ? (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={async (event) => {
-                                        event.stopPropagation();
-                                        const result = await deleteAnnotation(annotation.id);
-                                        if (!result.ok) {
-                                          toast.error("Delete failed", {
-                                            description:
-                                              result.error || "Please try again.",
-                                          });
-                                          return;
-                                        }
-                                        setAnnotations((prev) =>
-                                          prev.filter((item) => item.id !== annotation.id),
-                                        );
-                                        setSelectedAnnotationId(null);
-                                      }}
-                                    >
-                                      Delete
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              </div>
-                              <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                                <span>{width} × {height}</span>
-                                <span>•</span>
-                                <span
-                                  className="h-3.5 w-3.5 rounded-full border border-slate-300 shadow-sm"
-                                  style={{ backgroundColor: labelColor }}
-                                  aria-label={`Color preview ${labelColor}`}
-                                  title={labelColor}
-                                />
-                                <span className="font-mono">{labelColor}</span>
-                              </div>
-                            </Card>
-                          );
-                        })
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </TabsContent>
-              <TabsContent value="labels" className="flex-1 min-h-0 overflow-hidden">
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="border-b border-slate-200 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                      Label set
-                    </p>
-                    <div className="mt-2 flex items-center justify-between">
-                      <h2 className="text-base font-semibold text-slate-900">
-                        Project classes
-                      </h2>
-                      <Button size="sm" variant="outline" onClick={openLabelDialog}>
-                        Add label
-                      </Button>
-                    </div>
-                  </div>
-                  <ScrollArea className="flex-1 min-h-0">
-                    <div className="space-y-3 p-4">
-                      {!hasLabels ? (
-                        <Card className="border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
-                          {isLoadingProject
-                            ? "Loading labels..."
-                            : "No labels defined for this project yet."}
-                        </Card>
-                      ) : (
-                        projectLabels.map((label) => {
-                          const labelColor = label.color || "#3b82f6";
-                          return (
-                            <Card
-                              key={label.id}
-                              className={`border-slate-200 bg-white p-3 text-sm ${
-                                activeLabelId === label.id
-                                  ? "ring-2 ring-slate-900 ring-offset-1"
-                                  : ""
-                              }`}
-                              onClick={async () => {
-                                if (activeTool === "select" && selectedAnnotationId) {
-                                  const selected = getAnnotationById(selectedAnnotationId);
-                                  if (!selected) {
-                                    return;
-                                  }
-                                  const payload = {
-                                    project_class: label.id,
-                                    x_min: selected.x_min,
-                                    y_min: selected.y_min,
-                                    x_max: selected.x_max,
-                                    y_max: selected.y_max,
-                                  };
-                                  const result = await updateAnnotation(
-                                    selectedAnnotationId,
-                                    payload,
-                                  );
-                                  if (!result.ok) {
-                                    toast.error("Update failed", {
-                                      description: result.error || "Please try again.",
-                                    });
-                                    return;
-                                  }
-                                  setAnnotations((prev) =>
-                                    prev.map((annotation) =>
-                                      annotation.id === selectedAnnotationId
-                                        ? { ...annotation, project_class: label.id }
-                                        : annotation,
-                                    ),
-                                  );
-                                  return;
-                                }
-                                setActiveLabelId(label.id);
-                              }}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={async (event) => {
-                                if (event.key !== "Enter" && event.key !== " ") {
-                                  return;
-                                }
-                                event.preventDefault();
-                                if (activeTool === "select" && selectedAnnotationId) {
-                                  const selected = getAnnotationById(selectedAnnotationId);
-                                  if (!selected) {
-                                    return;
-                                  }
-                                  const payload = {
-                                    project_class: label.id,
-                                    x_min: selected.x_min,
-                                    y_min: selected.y_min,
-                                    x_max: selected.x_max,
-                                    y_max: selected.y_max,
-                                  };
-                                  const result = await updateAnnotation(
-                                    selectedAnnotationId,
-                                    payload,
-                                  );
-                                  if (!result.ok) {
-                                    toast.error("Update failed", {
-                                      description: result.error || "Please try again.",
-                                    });
-                                    return;
-                                  }
-                                  setAnnotations((prev) =>
-                                    prev.map((annotation) =>
-                                      annotation.id === selectedAnnotationId
-                                        ? { ...annotation, project_class: label.id }
-                                        : annotation,
-                                    ),
-                                  );
-                                  return;
-                                }
-                                setActiveLabelId(label.id);
-                              }}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className="h-2.5 w-2.5 rounded-full"
-                                    style={{ backgroundColor: labelColor }}
-                                  />
-                                  <span className="font-medium text-slate-900">
-                                    {label.name}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-slate-400">
-                                    Index {label.index}
-                                  </span>
-                                </div>
-                              </div>
-                              <p className="mt-2 text-xs text-slate-500">
-                                Tap to assign to selected box.
-                              </p>
-                            </Card>
-                          );
-                        })
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </TabsContent>
-            </Tabs>
+          <aside className="flex h-full w-full max-w-sm min-h-0 flex-col border-l border-border bg-background">
+            <AnnotationSidebar
+              activeLabelId={activeLabelId}
+              annotationCount={annotationCount}
+              annotations={annotations}
+              hiddenAnnotationIdSet={hiddenAnnotationIdSet}
+              isLoadingAnnotations={isLoadingAnnotations}
+              isLoadingProject={isLoadingProject}
+              onAddLabel={openLabelDialog}
+              onDeleteAnnotation={handleDeleteAnnotation}
+              onLabelClick={handleSidebarLabelClick}
+              onSelectAnnotation={handleSelectSidebarAnnotation}
+              onToggleAnnotationVisibility={handleToggleAnnotationVisibility}
+              projectLabels={projectLabels}
+              selectedAnnotationId={selectedAnnotationId}
+            />
+
+            <div className="border-t border-border p-4">
+              <Button
+                type="button"
+                className="w-full"
+                onClick={handleMarkImageDone}
+                disabled={!activeImage || isMarkingImageDone}
+              >
+                <CheckCircle className="mr-2 h-4 w-4" />
+                {isMarkingImageDone ? "Marking..." : "Mark done & next"}
+              </Button>
+            </div>
 
             <Dialog open={isLabelDialogOpen} onOpenChange={setIsLabelDialogOpen}>
               <DialogContent>
