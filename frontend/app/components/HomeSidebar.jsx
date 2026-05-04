@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ChevronUp,
   Cpu,
   FolderKanban,
-  LayoutGrid,
   LogOut,
   Pickaxe,
   ShieldUser,
@@ -75,9 +75,9 @@ export default function HomeSidebar() {
     <>
       <Sidebar collapsible="icon">
         <SidebarHeader className="gap-2 px-3 py-4">
-          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-            <LayoutGrid className="size-4 text-slate-900" />
-            AAS
+          <div className="flex items-center gap-2 text-sm font-bold uppercase text-foreground">
+            <Image src="/app-icon.svg" alt="" width={28} height={28} className="border border-border" />
+            <span className="group-data-[collapsible=icon]:hidden">AAS</span>
           </div>
         </SidebarHeader>
         <SidebarSeparator />

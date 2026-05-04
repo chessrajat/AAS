@@ -16,6 +16,11 @@ const geistMono = Geist_Mono({
 export const metadata = {
   title: "Advance Annotation System",
   description: "An advanced annotation system for managing and annotating datasets.",
+  icons: {
+    icon: "/app-icon.svg",
+    shortcut: "/app-icon.svg",
+    apple: "/app-icon.svg",
+  },
 };
 
 export default function RootLayout({ children }) {

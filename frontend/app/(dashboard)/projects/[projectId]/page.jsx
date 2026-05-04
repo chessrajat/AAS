@@ -1426,10 +1426,10 @@ export default function ProjectAnnotatePage() {
     <SidebarProvider>
       <HomeSidebar />
       <SidebarInset>
-        <div className="relative flex h-full flex-1 overflow-hidden bg-slate-50 text-slate-900">
+        <div className="relative flex h-full flex-1 overflow-hidden bg-background text-foreground">
           {isExporting ? (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
-              <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#201d1d]/40">
+              <div className="rounded-sm border border-border bg-background px-6 py-5 text-center">
                 <p className="text-sm font-semibold text-slate-900">Exporting dataset</p>
                 <p className="mt-2 text-xs text-slate-500">
                   {exportProgress ? `${exportProgress}%` : "Preparing download..."}
@@ -1438,8 +1438,8 @@ export default function ProjectAnnotatePage() {
             </div>
           ) : null}
           {isAutoAnnotating ? (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
-              <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#201d1d]/40">
+              <div className="rounded-sm border border-border bg-background px-6 py-5 text-center">
                 <p className="text-sm font-semibold text-slate-900">Auto-annotating</p>
                 <p className="mt-2 text-xs text-slate-500">
                   Running model on job images...
@@ -1449,7 +1449,7 @@ export default function ProjectAnnotatePage() {
           ) : null}
 
           <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+        <header className="flex items-center justify-between border-b border-border bg-background px-4 py-3">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
@@ -1504,7 +1504,7 @@ export default function ProjectAnnotatePage() {
         </header>
 
         <div className="flex flex-1 overflow-hidden">
-          <aside className="hidden w-16 flex-col items-center gap-3 border-r border-slate-200 bg-white py-4 md:flex">
+          <aside className="hidden w-16 flex-col items-center gap-3 border-r border-border bg-background py-4 md:flex">
             <TooltipProvider delayDuration={200}>
               <div className="flex flex-1 flex-col items-center gap-2">
                 <Tooltip>
@@ -1514,7 +1514,7 @@ export default function ProjectAnnotatePage() {
                       variant={activeTool === "draw" ? "secondary" : "ghost"}
                       className={
                         activeTool === "draw"
-                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
+                          ? "bg-primary text-primary-foreground hover:bg-[#0f0000]"
                           : ""
                       }
                       onClick={() => setActiveTool("draw")}
@@ -1531,7 +1531,7 @@ export default function ProjectAnnotatePage() {
                       variant={activeTool === "select" ? "secondary" : "ghost"}
                       className={
                         activeTool === "select"
-                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
+                          ? "bg-primary text-primary-foreground hover:bg-[#0f0000]"
                           : ""
                       }
                       onClick={() => setActiveTool("select")}
@@ -1548,7 +1548,7 @@ export default function ProjectAnnotatePage() {
                       variant={activeTool === "pan" ? "secondary" : "ghost"}
                       className={
                         activeTool === "pan"
-                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
+                          ? "bg-primary text-primary-foreground hover:bg-[#0f0000]"
                           : ""
                       }
                       onClick={() => setActiveTool("pan")}
@@ -1558,7 +1558,7 @@ export default function ProjectAnnotatePage() {
                   </TooltipTrigger>
                   <TooltipContent side="right">Pan canvas</TooltipContent>
                 </Tooltip>
-                <div className="h-px w-8 bg-slate-200" />
+                <div className="h-px w-8 bg-border" />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -1594,8 +1594,8 @@ export default function ProjectAnnotatePage() {
               </div>
             </TooltipProvider>
           </aside>
-          <div className="flex flex-1 flex-col bg-slate-100">
-            <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-2 text-xs text-slate-500">
+          <div className="flex flex-1 flex-col bg-muted">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
               <Button
                 size="icon"
                 variant="ghost"
@@ -1628,7 +1628,7 @@ export default function ProjectAnnotatePage() {
                     onChange={handleImageJumpChange}
                     onKeyDown={handleImageJumpKeyDown}
                     disabled={!hasImages}
-                    className="h-7 w-16 bg-white px-2 text-xs"
+                    className="h-7 w-16 bg-background px-2 text-xs"
                     aria-label="Go to image number"
                   />
                   <Button
@@ -1674,9 +1674,9 @@ export default function ProjectAnnotatePage() {
               </div>
             </div>
             <div className="flex flex-1 items-center justify-center p-6">
-              <div className="relative flex h-full w-full max-w-4xl items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
+              <div className="relative flex h-full w-full max-w-4xl items-center justify-center rounded-sm border border-dashed border-border bg-background">
                 {!hasImages ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-4 text-center text-sm text-slate-500">
+                  <div className="rounded-sm border border-border bg-muted px-6 py-4 text-center text-sm text-muted-foreground">
                     {activeJobId
                       ? "No images available in this job. Please upload some."
                       : "Create or select a job to start adding images."}
@@ -1684,7 +1684,7 @@ export default function ProjectAnnotatePage() {
                 ) : (
                   <div
                     ref={imageContainerRef}
-                    className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-slate-50"
+                    className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-sm bg-muted"
                   >
                     <div
                       className="relative"
@@ -1734,16 +1734,16 @@ export default function ProjectAnnotatePage() {
             </div>
           </div>
 
-          <aside className="flex h-full w-full max-w-sm min-h-0 flex-col border-l border-slate-200 bg-white pb-10">
+          <aside className="flex h-full w-full max-w-sm min-h-0 flex-col border-l border-border bg-background pb-10">
             <Tabs defaultValue="objects" className="flex h-full min-h-0 flex-col">
-              <TabsList className="grid w-full grid-cols-2 rounded-none bg-slate-100">
+              <TabsList className="grid w-full grid-cols-2 rounded-none bg-muted">
                 <TabsTrigger value="objects">Objects</TabsTrigger>
                 <TabsTrigger value="labels">Labels</TabsTrigger>
               </TabsList>
               <TabsContent value="objects" className="flex-1 min-h-0 overflow-hidden">
                 <div className="flex h-full min-h-0 flex-col">
-                  <div className="space-y-3 border-b border-slate-200 p-4">
-                    <Input placeholder="Search frames or IDs" className="bg-white" />
+                  <div className="space-y-3 border-b border-border p-4">
+                    <Input placeholder="Search frames or IDs" className="bg-background" />
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary">{annotationCount} active</Badge>
                       <Badge variant="outline">0 pending</Badge>
@@ -1752,7 +1752,7 @@ export default function ProjectAnnotatePage() {
                   <ScrollArea className="flex-1 min-h-0">
                     <div className="space-y-3 p-4">
                       {annotations.length === 0 ? (
-                        <Card className="border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                        <Card className="border-border bg-muted p-3 text-sm text-muted-foreground">
                           {isLoadingAnnotations
                             ? "Loading annotations..."
                             : "No annotations yet for this image."}

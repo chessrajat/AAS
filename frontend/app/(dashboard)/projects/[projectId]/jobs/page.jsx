@@ -160,7 +160,7 @@ export default function ProjectJobsPage() {
     <SidebarProvider>
       <HomeSidebar />
       <SidebarInset>
-        <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/80 px-6 py-4 backdrop-blur">
+        <header className="aas-header">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
@@ -168,18 +168,18 @@ export default function ProjectJobsPage() {
             </Link>
             <ChevronRight className="h-4 w-4 text-slate-400" />
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              <p className="aas-kicker">
                 Jobs
               </p>
-              <h1 className="text-xl font-semibold text-slate-900">
+              <h1 className="aas-page-title">
                 {project?.name || `Project #${projectId}`}
               </h1>
             </div>
           </div>
         </header>
 
-        <main className="flex-1 space-y-6 bg-slate-50 px-6 py-6">
-          <Card className="border-slate-200 bg-white p-4">
+        <main className="aas-content">
+          <Card className="border-border bg-card p-4">
             <form
               className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
               onSubmit={handleCreateJob}
@@ -211,8 +211,8 @@ export default function ProjectJobsPage() {
             </form>
           </Card>
 
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-            <div className="grid grid-cols-[1fr_1fr_110px_170px] bg-slate-100 px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+          <div className="overflow-hidden rounded-sm border border-border bg-card">
+            <div className="grid grid-cols-[1fr_1fr_110px_170px] bg-muted px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
               <span>Name</span>
               <span>Description</span>
               <span>Images</span>
@@ -228,7 +228,7 @@ export default function ProjectJobsPage() {
               jobs.map((job) => (
                 <div
                   key={job.id}
-                  className="grid grid-cols-[1fr_1fr_110px_170px] items-center border-t border-slate-200 px-4 py-3 text-sm"
+                  className="grid grid-cols-[1fr_1fr_110px_170px] items-center border-t border-border px-4 py-3 text-sm"
                 >
                   <span className="font-medium text-slate-900">{job.name}</span>
                   <span className="truncate text-slate-500">

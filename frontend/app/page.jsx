@@ -184,14 +184,14 @@ export default function Home() {
     <SidebarProvider>
       <HomeSidebar />
       <SidebarInset>
-        <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/80 px-6 py-4 backdrop-blur">
+        <header className="aas-header">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              <p className="aas-kicker">
                 Dashboard
               </p>
-              <h1 className="text-xl font-semibold text-slate-900">Projects</h1>
+              <h1 className="aas-page-title">Projects</h1>
             </div>
           </div>
           <Dialog
@@ -313,7 +313,7 @@ export default function Home() {
             </DialogContent>
           </Dialog>
         </header>
-        <div className="flex-1 space-y-6 bg-slate-50 px-6 py-6">
+        <div className="aas-content">
           {isLoadingProjects ? (
             <Card className="border-dashed border-slate-200/70 bg-white p-10 text-center">
               <p className="text-sm text-slate-500">Loading projects...</p>
@@ -329,7 +329,7 @@ export default function Home() {
               {projects.map((project) => (
                 <div key={project.id} className="relative">
                   <Link href={`/projects/${project.id}/jobs`} className="block">
-                    <Card className="border-slate-200/70 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
+                    <Card className="border-border bg-card p-5 transition hover:border-foreground">
                       <div className="space-y-2">
                         <h2 className="text-lg font-semibold text-slate-900">
                           {project.name}

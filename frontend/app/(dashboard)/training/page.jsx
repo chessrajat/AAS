@@ -416,14 +416,14 @@ export default function TrainingPage() {
     <SidebarProvider>
       <HomeSidebar />
       <SidebarInset>
-        <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/80 px-6 py-4 backdrop-blur">
+        <header className="aas-header">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              <p className="aas-kicker">
                 Workspace
               </p>
-              <h1 className="text-xl font-semibold text-slate-900">Training</h1>
+              <h1 className="aas-page-title">Training</h1>
             </div>
           </div>
           <Dialog
@@ -530,7 +530,7 @@ export default function TrainingPage() {
           </Dialog>
         </header>
 
-        <main className="grid min-h-0 flex-1 grid-cols-[320px_1fr] overflow-hidden bg-slate-50">
+        <main className="grid min-h-0 flex-1 grid-cols-[320px_1fr] overflow-hidden bg-background">
           <aside className="min-h-0 overflow-y-auto border-r border-slate-200 bg-white p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-900">Pipelines</h2>

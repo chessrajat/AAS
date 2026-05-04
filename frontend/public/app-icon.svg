@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">AAS icon</title>
+  <desc id="desc">Monospaced annotation mark for Advance Annotation System</desc>
+  <rect width="64" height="64" fill="#fdfcfc"/>
+  <path d="M8.5 8.5h47v47h-47z" fill="none" stroke="#201d1d" stroke-width="3"/>
+  <path d="M18 40V24h28v16H18z" fill="none" stroke="#201d1d" stroke-width="3"/>
+  <path d="M18 24h-6m6 16h-6m40-16h-6m6 16h-6M24 18v-6m16 6v-6m-16 40v-6m16 6v-6" stroke="#201d1d" stroke-width="3" stroke-linecap="square"/>
+  <path d="M24 35l5-12h6l5 12h-5l-.8-2.4h-4.4L29 35h-5zm6.8-6h2.4L32 25.5 30.8 29z" fill="#201d1d"/>
+</svg>
