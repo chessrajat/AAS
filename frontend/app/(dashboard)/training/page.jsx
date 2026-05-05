@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Play, Plus, RefreshCcw, Save, Trash2, Upload } from "lucide-react";
+import { Database, Download, ListChecks, Play, Plus, RefreshCw, Save, Settings2, Tags, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import HomeSidebar from "../../components/HomeSidebar";
@@ -49,8 +49,9 @@ export default function TrainingPage() {
     createTrainingJob,
     createTrainingPipeline,
     deleteTrainingClass,
+    fetchModels,
+    fetchTrainingDatasets,
     fetchTrainingConfigs,
-    fetchTrainingItems,
     fetchTrainingJobs,
     fetchTrainingPipeline,
     fetchTrainingPipelines,
@@ -58,13 +59,18 @@ export default function TrainingPage() {
     downloadTrainingJobArtifactsZip,
     isCreatingTrainingPipeline,
     isLoadingTrainingPipelines,
+    models,
+    trainingDatasets,
     trainingPipelines,
     updateTrainingClass,
-    uploadTrainingItems,
-    uploadTrainingZip,
+    updateTrainingConfig,
   } = useApiStore();
 
   const [isPipelineDialogOpen, setIsPipelineDialogOpen] = useState(false);
+  const [isClassesDialogOpen, setIsClassesDialogOpen] = useState(false);
+  const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
+  const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false);
+  const [isConfigDialogOpen, setIsConfigDialogOpen] = useState(false);
   const [pipelineName, setPipelineName] = useState("");
   const [pipelineDescription, setPipelineDescription] = useState("");
   const [pipelineTask, setPipelineTask] = useState("detect");
@@ -75,21 +81,16 @@ export default function TrainingPage() {
   const [newClassName, setNewClassName] = useState("");
   const [newClassIndex, setNewClassIndex] = useState(0);
   const [isSavingClass, setIsSavingClass] = useState(false);
-  const [items, setItems] = useState([]);
   const [configs, setConfigs] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [imageFiles, setImageFiles] = useState(null);
-  const [labelFiles, setLabelFiles] = useState(null);
-  const [zipFile, setZipFile] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isUploadingZip, setIsUploadingZip] = useState(false);
+  const [selectedDatasetId, setSelectedDatasetId] = useState("");
   const [trainPercent, setTrainPercent] = useState(80);
   const [valPercent, setValPercent] = useState(10);
   const [testPercent, setTestPercent] = useState(10);
   const [splitSeed, setSplitSeed] = useState(42);
   const [isApplyingSplit, setIsApplyingSplit] = useState(false);
   const [configName, setConfigName] = useState("Default training");
-  const [baseModel, setBaseModel] = useState("yolo11n.pt");
+  const [baseModel, setBaseModel] = useState("");
   const [trainingArgs, setTrainingArgs] = useState(DEFAULT_TRAINING_ARGS);
   const [selectedConfigId, setSelectedConfigId] = useState("");
   const [isSavingConfig, setIsSavingConfig] = useState(false);
@@ -99,6 +100,22 @@ export default function TrainingPage() {
 
   const splitTotal = Number(trainPercent) + Number(valPercent) + Number(testPercent);
   const latestJob = jobs[0];
+  const selectedDataset = useMemo(
+    () => trainingDatasets.find((dataset) => String(dataset.id) === String(selectedDatasetId)),
+    [selectedDatasetId, trainingDatasets],
+  );
+  const selectedConfig = useMemo(
+    () => configs.find((config) => String(config.id) === String(selectedConfigId)),
+    [configs, selectedConfigId],
+  );
+  const selectedModel = useMemo(
+    () => models.find((model) => `ai_model:${model.id}` === baseModel),
+    [baseModel, models],
+  );
+  const availableBaseModels = useMemo(
+    () => models.filter((model) => model.file_url || model.file),
+    [models],
+  );
   const artifactTypeLabels = {
     best_model: "Best model",
     last_model: "Last model",
@@ -107,15 +124,7 @@ export default function TrainingPage() {
     log: "Log",
     dataset_zip: "Dataset ZIP",
   };
-  const itemCounts = useMemo(() => {
-    return items.reduce(
-      (counts, item) => ({
-        ...counts,
-        [item.split]: (counts[item.split] || 0) + 1,
-      }),
-      { train: 0, val: 0, test: 0, unassigned: 0 },
-    );
-  }, [items]);
+  const selectedDatasetAssetCount = selectedDataset?.asset_count || 0;
 
   const resetPipelineForm = () => {
     setPipelineName("");
@@ -129,9 +138,8 @@ export default function TrainingPage() {
       if (!pipelineId) {
         return;
       }
-      const [pipelineResult, itemsResult, configsResult, jobsResult] = await Promise.all([
+      const [pipelineResult, configsResult, jobsResult] = await Promise.all([
         fetchTrainingPipeline(pipelineId),
-        fetchTrainingItems(pipelineId),
         fetchTrainingConfigs(pipelineId),
         fetchTrainingJobs(pipelineId),
       ]);
@@ -148,12 +156,23 @@ export default function TrainingPage() {
           setSplitSeed(splitConfig.seed);
         }
       }
-      if (itemsResult.ok) {
-        setItems(itemsResult.data || []);
-      }
       if (configsResult.ok) {
-        setConfigs(configsResult.data || []);
-        setSelectedConfigId((prev) => prev || (configsResult.data?.[0]?.id ? String(configsResult.data[0].id) : ""));
+        const nextConfigs = configsResult.data || [];
+        setConfigs(nextConfigs);
+        const nextConfig =
+          nextConfigs.find((config) => String(config.id) === String(selectedConfigId)) ||
+          nextConfigs[0];
+        if (nextConfig) {
+          setSelectedConfigId(String(nextConfig.id));
+          setConfigName(nextConfig.name);
+          setBaseModel(nextConfig.base_model || "");
+          setTrainingArgs({ ...DEFAULT_TRAINING_ARGS, ...(nextConfig.args || {}) });
+        } else {
+          setSelectedConfigId("");
+          setConfigName("Default training");
+          setBaseModel("");
+          setTrainingArgs(DEFAULT_TRAINING_ARGS);
+        }
       }
       if (jobsResult.ok) {
         setJobs(jobsResult.data || []);
@@ -162,9 +181,9 @@ export default function TrainingPage() {
     [
       activePipelineId,
       fetchTrainingConfigs,
-      fetchTrainingItems,
       fetchTrainingJobs,
       fetchTrainingPipeline,
+      selectedConfigId,
     ],
   );
 
@@ -173,7 +192,14 @@ export default function TrainingPage() {
       return;
     }
     fetchTrainingPipelines();
-  }, [accessToken, fetchTrainingPipelines]);
+    fetchTrainingDatasets().then((result) => {
+      const firstDatasetId = result.data?.[0]?.id;
+      if (result.ok && firstDatasetId) {
+        setSelectedDatasetId((current) => current || String(firstDatasetId));
+      }
+    });
+    fetchModels(accessToken);
+  }, [accessToken, fetchModels, fetchTrainingDatasets, fetchTrainingPipelines]);
 
   const handleClassChange = (index, field, value) => {
     setPipelineClasses((prev) =>
@@ -293,57 +319,6 @@ export default function TrainingPage() {
     resetPipelineForm();
   };
 
-  const handleUploadItems = async () => {
-    if (!activePipelineId) {
-      toast.error("Select a training pipeline first.");
-      return;
-    }
-    if (!imageFiles?.length) {
-      toast.error("Select image files first.");
-      return;
-    }
-    setIsUploading(true);
-    const result = await uploadTrainingItems(activePipelineId, imageFiles, labelFiles || []);
-    setIsUploading(false);
-    if (!result.ok) {
-      toast.error("Upload failed", {
-        description: result.error || "Please try again.",
-      });
-      return;
-    }
-    toast.success("Dataset uploaded", {
-      description: `${result.data.length} image(s) added.`,
-    });
-    setImageFiles(null);
-    setLabelFiles(null);
-    await refreshActivePipeline();
-  };
-
-  const handleUploadZip = async () => {
-    if (!activePipelineId) {
-      toast.error("Select a training pipeline first.");
-      return;
-    }
-    if (!zipFile) {
-      toast.error("Select a ZIP archive first.");
-      return;
-    }
-    setIsUploadingZip(true);
-    const result = await uploadTrainingZip(activePipelineId, zipFile);
-    setIsUploadingZip(false);
-    if (!result.ok) {
-      toast.error("ZIP upload failed", {
-        description: result.error || "Please try again.",
-      });
-      return;
-    }
-    toast.success("Dataset ZIP uploaded", {
-      description: `${result.data.length} image(s) added.`,
-    });
-    setZipFile(null);
-    await refreshActivePipeline();
-  };
-
   const handleApplySplit = async () => {
     if (!activePipelineId) {
       toast.error("Select a training pipeline first.");
@@ -370,11 +345,23 @@ export default function TrainingPage() {
     toast.success("Split applied", {
       description: `${result.data.train_count} train, ${result.data.val_count} val, ${result.data.test_count} test.`,
     });
+    setIsSplitDialogOpen(false);
     await refreshActivePipeline();
   };
 
   const setTrainingArg = (key, value) => {
     setTrainingArgs((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSelectConfig = (value) => {
+    setSelectedConfigId(value);
+    const config = configs.find((item) => String(item.id) === String(value));
+    if (!config) {
+      return;
+    }
+    setConfigName(config.name);
+    setBaseModel(config.base_model || "");
+    setTrainingArgs({ ...DEFAULT_TRAINING_ARGS, ...(config.args || {}) });
   };
 
   const getDownloadFilename = (headers, fallback) => {
@@ -442,12 +429,19 @@ export default function TrainingPage() {
       toast.error("Configuration name is required.");
       return;
     }
+    if (!baseModel) {
+      toast.error("Select an uploaded base model first.");
+      return;
+    }
     setIsSavingConfig(true);
-    const result = await createTrainingConfig(activePipelineId, {
+    const payload = {
       name: configName.trim(),
-      base_model: baseModel.trim() || "yolo11n.pt",
+      base_model: baseModel,
       args: trainingArgs,
-    });
+    };
+    const result = selectedConfigId
+      ? await updateTrainingConfig(selectedConfigId, payload)
+      : await createTrainingConfig(activePipelineId, payload);
     setIsSavingConfig(false);
     if (!result.ok) {
       toast.error("Save failed", {
@@ -455,9 +449,15 @@ export default function TrainingPage() {
       });
       return;
     }
-    toast.success("Training configuration saved.");
-    setConfigs((prev) => [result.data, ...prev]);
+    toast.success(selectedConfigId ? "Training configuration updated." : "Training configuration saved.");
+    setConfigs((prev) => {
+      if (selectedConfigId) {
+        return prev.map((config) => (String(config.id) === String(selectedConfigId) ? result.data : config));
+      }
+      return [result.data, ...prev];
+    });
     setSelectedConfigId(String(result.data.id));
+    setIsConfigDialogOpen(false);
   };
 
   const handleQueueTraining = async () => {
@@ -465,8 +465,16 @@ export default function TrainingPage() {
       toast.error("Save or select a training configuration first.");
       return;
     }
+    if (!selectedDatasetId) {
+      toast.error("Select a training dataset first.");
+      return;
+    }
     setIsQueueingJob(true);
-    const result = await createTrainingJob(activePipelineId, Number(selectedConfigId));
+    const result = await createTrainingJob(
+      activePipelineId,
+      Number(selectedConfigId),
+      Number(selectedDatasetId),
+    );
     setIsQueueingJob(false);
     if (!result.ok) {
       toast.error("Queue failed", {
@@ -603,7 +611,7 @@ export default function TrainingPage() {
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-900">Pipelines</h2>
               <Button size="icon" variant="ghost" onClick={fetchTrainingPipelines}>
-                <RefreshCcw className="h-4 w-4" />
+                <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
             {isLoadingTrainingPipelines ? (
@@ -646,292 +654,333 @@ export default function TrainingPage() {
               </Card>
             ) : (
               <div className="space-y-6">
-                <Card className="border-slate-200 bg-white p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                        {activePipeline.task}
-                      </p>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
                       <h2 className="text-xl font-semibold text-slate-900">
                         {activePipeline.name}
                       </h2>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {activePipeline.description || "No description"}
-                      </p>
+                      <Badge variant="secondary">{activePipeline.status}</Badge>
                     </div>
-                    <Badge variant="secondary">{activePipeline.status}</Badge>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {activePipeline.description || activePipeline.task}
+                    </p>
                   </div>
-                  <div className="mt-5 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-slate-900">Classes</h3>
-                      <Badge variant="outline">{classRows.length} total</Badge>
-                    </div>
-                    <div className="overflow-hidden rounded-lg border border-slate-200">
-                      <div className="grid grid-cols-[90px_1fr_110px] bg-slate-100 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-                        <span>Index</span>
-                        <span>Name</span>
-                        <span className="text-right">Actions</span>
-                      </div>
-                      {classRows.length === 0 ? (
-                        <div className="px-3 py-4 text-sm text-slate-500">
-                          No classes yet.
+                  <Button
+                    variant="secondary"
+                    onClick={handleQueueTraining}
+                    disabled={isQueueingJob || !selectedConfigId || !selectedDatasetId}
+                  >
+                    <Play />
+                    {isQueueingJob ? "Queueing..." : "Start training"}
+                  </Button>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Button
+                    variant="outline"
+                    className="h-auto justify-start gap-3 p-4 text-left"
+                    onClick={() => setIsClassesDialogOpen(true)}
+                  >
+                    <Tags className="h-5 w-5 text-slate-500" />
+                    <span>
+                      <span className="block font-semibold text-slate-900">Classes</span>
+                      <span className="block text-xs text-slate-500">{classRows.length} classes</span>
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-auto justify-start gap-3 p-4 text-left"
+                    onClick={() => setIsDatasetDialogOpen(true)}
+                  >
+                    <Database className="h-5 w-5 text-slate-500" />
+                    <span>
+                      <span className="block font-semibold text-slate-900">Dataset</span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {selectedDataset ? `${selectedDataset.name} · ${selectedDatasetAssetCount} files` : "Select dataset"}
+                      </span>
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-auto justify-start gap-3 p-4 text-left"
+                    onClick={() => setIsSplitDialogOpen(true)}
+                  >
+                    <ListChecks className="h-5 w-5 text-slate-500" />
+                    <span>
+                      <span className="block font-semibold text-slate-900">Split</span>
+                      <span className={splitTotal === 100 ? "block text-xs text-slate-500" : "block text-xs text-red-500"}>
+                        {trainPercent}/{valPercent}/{testPercent}
+                      </span>
+                    </span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-auto justify-start gap-3 p-4 text-left"
+                    onClick={() => setIsConfigDialogOpen(true)}
+                  >
+                    <Settings2 className="h-5 w-5 text-slate-500" />
+                    <span>
+                      <span className="block font-semibold text-slate-900">YOLO config</span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {selectedConfig ? `Saved: ${selectedConfig.name}` : "Not saved"}
+                      </span>
+                    </span>
+                  </Button>
+                </div>
+
+                <Dialog open={isClassesDialogOpen} onOpenChange={setIsClassesDialogOpen}>
+                  <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                      <DialogTitle>Classes</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                      <div className="overflow-hidden rounded-lg border border-slate-200">
+                        <div className="grid grid-cols-[90px_1fr_110px] bg-slate-100 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+                          <span>Index</span>
+                          <span>Name</span>
+                          <span className="text-right">Actions</span>
                         </div>
-                      ) : (
-                        classRows
-                          .slice()
-                          .sort((first, second) => first.index - second.index)
-                          .map((trainingClass) => (
-                            <div
-                              key={trainingClass.id}
-                              className="grid grid-cols-[90px_1fr_110px] items-center gap-2 border-t border-slate-200 px-3 py-2"
-                            >
-                              <Input
-                                type="number"
-                                min="0"
-                                value={trainingClass.index}
-                                onChange={(event) =>
-                                  handleClassRowChange(
-                                    trainingClass.id,
-                                    "index",
-                                    Number(event.target.value),
-                                  )
-                                }
-                                className="h-8"
-                              />
-                              <Input
-                                value={trainingClass.name}
-                                onChange={(event) =>
-                                  handleClassRowChange(
-                                    trainingClass.id,
-                                    "name",
-                                    event.target.value,
-                                  )
-                                }
-                                className="h-8"
-                              />
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  onClick={() => handleSaveTrainingClass(trainingClass)}
-                                  disabled={isSavingClass}
-                                  aria-label={`Save ${trainingClass.name}`}
-                                >
-                                  <Save className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="text-red-500 hover:text-red-600"
-                                  onClick={() => handleDeleteTrainingClass(trainingClass)}
-                                  disabled={isSavingClass}
-                                  aria-label={`Delete ${trainingClass.name}`}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                        {classRows.length === 0 ? (
+                          <div className="px-3 py-4 text-sm text-slate-500">No classes yet.</div>
+                        ) : (
+                          classRows
+                            .slice()
+                            .sort((first, second) => first.index - second.index)
+                            .map((trainingClass) => (
+                              <div
+                                key={trainingClass.id}
+                                className="grid grid-cols-[90px_1fr_110px] items-center gap-2 border-t border-slate-200 px-3 py-2"
+                              >
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={trainingClass.index}
+                                  onChange={(event) =>
+                                    handleClassRowChange(trainingClass.id, "index", Number(event.target.value))
+                                  }
+                                  className="h-8"
+                                />
+                                <Input
+                                  value={trainingClass.name}
+                                  onChange={(event) =>
+                                    handleClassRowChange(trainingClass.id, "name", event.target.value)
+                                  }
+                                  className="h-8"
+                                />
+                                <div className="flex justify-end gap-1">
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => handleSaveTrainingClass(trainingClass)}
+                                    disabled={isSavingClass}
+                                    aria-label={`Save ${trainingClass.name}`}
+                                  >
+                                    <Save className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="text-red-500 hover:text-red-600"
+                                    onClick={() => handleDeleteTrainingClass(trainingClass)}
+                                    disabled={isSavingClass}
+                                    aria-label={`Delete ${trainingClass.name}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
-                          ))
-                      )}
+                            ))
+                        )}
+                      </div>
+                      <div className="grid gap-2 md:grid-cols-[90px_1fr_auto]">
+                        <Input
+                          type="number"
+                          min="0"
+                          value={newClassIndex}
+                          onChange={(event) => setNewClassIndex(Number(event.target.value))}
+                          className="h-9"
+                          aria-label="New class index"
+                        />
+                        <Input
+                          value={newClassName}
+                          onChange={(event) => setNewClassName(event.target.value)}
+                          placeholder="New class name"
+                          className="h-9"
+                        />
+                        <Button variant="outline" onClick={handleAddTrainingClass} disabled={isSavingClass}>
+                          <Plus />
+                          Add class
+                        </Button>
+                      </div>
                     </div>
-                    <div className="grid gap-2 md:grid-cols-[90px_1fr_auto]">
-                      <Input
-                        type="number"
-                        min="0"
-                        value={newClassIndex}
-                        onChange={(event) => setNewClassIndex(Number(event.target.value))}
-                        className="h-9"
-                        aria-label="New class index"
-                      />
-                      <Input
-                        value={newClassName}
-                        onChange={(event) => setNewClassName(event.target.value)}
-                        placeholder="New class name"
-                        className="h-9"
-                      />
-                      <Button
-                        variant="outline"
-                        onClick={handleAddTrainingClass}
-                        disabled={isSavingClass}
-                      >
-                        <Plus />
-                        Add class
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
+                  </DialogContent>
+                </Dialog>
 
-                <Card className="border-slate-200 bg-white p-5">
-                  <h3 className="text-base font-semibold text-slate-900">Dataset upload</h3>
-                  <div className="mt-4 grid gap-4 md:grid-cols-[1fr_1fr_auto]">
-                    <div className="space-y-2">
-                      <Label htmlFor="training-images">Images</Label>
-                      <Input
-                        id="training-images"
-                        type="file"
-                        multiple
-                        accept="image/*"
-                        onChange={(event) => setImageFiles(event.target.files)}
-                      />
+                <Dialog open={isDatasetDialogOpen} onOpenChange={setIsDatasetDialogOpen}>
+                  <DialogContent className="max-w-xl">
+                    <DialogHeader>
+                      <DialogTitle>Select training dataset</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="training-dataset">Dataset</Label>
+                        <NativeSelect
+                          id="training-dataset"
+                          value={selectedDatasetId}
+                          onChange={(event) => setSelectedDatasetId(event.target.value)}
+                        >
+                          <NativeSelectOption value="">Select dataset</NativeSelectOption>
+                          {trainingDatasets.map((dataset) => (
+                            <NativeSelectOption key={dataset.id} value={String(dataset.id)}>
+                              {dataset.name} · {dataset.asset_count || 0} files
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelect>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                        {selectedDataset
+                          ? `${selectedDataset.name} has ${selectedDatasetAssetCount} image/label pair(s).`
+                          : "Create datasets from the Training Datasets page before starting training."}
+                      </div>
+                      <div className="flex justify-end">
+                        <Button onClick={() => setIsDatasetDialogOpen(false)}>Done</Button>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="training-labels">YOLO labels</Label>
-                      <Input
-                        id="training-labels"
-                        type="file"
-                        multiple
-                        accept=".txt"
-                        onChange={(event) => setLabelFiles(event.target.files)}
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <Button onClick={handleUploadItems} disabled={isUploading}>
-                        <Upload />
-                        {isUploading ? "Uploading..." : "Upload"}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto]">
-                    <div className="space-y-2">
-                      <Label htmlFor="training-zip">Dataset ZIP</Label>
-                      <Input
-                        id="training-zip"
-                        type="file"
-                        accept=".zip,application/zip,application/x-zip-compressed"
-                        onChange={(event) => setZipFile(event.target.files?.[0] || null)}
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <Button variant="secondary" onClick={handleUploadZip} disabled={isUploadingZip}>
-                        <Upload />
-                        {isUploadingZip ? "Uploading..." : "Upload ZIP"}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2 text-sm">
-                    <Badge variant="secondary">{items.length} total</Badge>
-                    <Badge variant="outline">{itemCounts.train} train</Badge>
-                    <Badge variant="outline">{itemCounts.val} val</Badge>
-                    <Badge variant="outline">{itemCounts.test} test</Badge>
-                    <Badge variant="outline">{itemCounts.unassigned} unassigned</Badge>
-                  </div>
-                </Card>
+                  </DialogContent>
+                </Dialog>
 
-                <Card className="border-slate-200 bg-white p-5">
-                  <h3 className="text-base font-semibold text-slate-900">Train / val / test split</h3>
-                  <div className="mt-4 grid gap-4 md:grid-cols-5">
-                    <div className="space-y-2">
-                      <Label htmlFor="train-percent">Train %</Label>
-                      <Input id="train-percent" type="number" value={trainPercent} onChange={(event) => setTrainPercent(Number(event.target.value))} />
+                <Dialog open={isSplitDialogOpen} onOpenChange={setIsSplitDialogOpen}>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>Train / validation / test split</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="train-percent">Train %</Label>
+                        <Input id="train-percent" type="number" value={trainPercent} onChange={(event) => setTrainPercent(Number(event.target.value))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="val-percent">Val %</Label>
+                        <Input id="val-percent" type="number" value={valPercent} onChange={(event) => setValPercent(Number(event.target.value))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="test-percent">Test %</Label>
+                        <Input id="test-percent" type="number" value={testPercent} onChange={(event) => setTestPercent(Number(event.target.value))} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="split-seed">Seed</Label>
+                        <Input id="split-seed" type="number" value={splitSeed} onChange={(event) => setSplitSeed(Number(event.target.value))} />
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="val-percent">Val %</Label>
-                      <Input id="val-percent" type="number" value={valPercent} onChange={(event) => setValPercent(Number(event.target.value))} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="test-percent">Test %</Label>
-                      <Input id="test-percent" type="number" value={testPercent} onChange={(event) => setTestPercent(Number(event.target.value))} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="split-seed">Seed</Label>
-                      <Input id="split-seed" type="number" value={splitSeed} onChange={(event) => setSplitSeed(Number(event.target.value))} />
-                    </div>
-                    <div className="flex items-end">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className={splitTotal === 100 ? "text-xs text-slate-500" : "text-xs text-red-500"}>
+                        Current total: {splitTotal}%
+                      </p>
                       <Button onClick={handleApplySplit} disabled={isApplyingSplit || splitTotal !== 100}>
                         {isApplyingSplit ? "Applying..." : "Apply split"}
                       </Button>
                     </div>
-                  </div>
-                  <p className={splitTotal === 100 ? "mt-2 text-xs text-slate-500" : "mt-2 text-xs text-red-500"}>
-                    Current total: {splitTotal}%
-                  </p>
-                </Card>
+                  </DialogContent>
+                </Dialog>
 
-                <Card className="border-slate-200 bg-white p-5">
-                  <h3 className="text-base font-semibold text-slate-900">YOLO training configuration</h3>
-                  <div className="mt-4 grid gap-4 md:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="config-name">Config name</Label>
-                      <Input id="config-name" value={configName} onChange={(event) => setConfigName(event.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="base-model">Base model</Label>
-                      <Input id="base-model" value={baseModel} onChange={(event) => setBaseModel(event.target.value)} placeholder="yolo11n.pt" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="optimizer">Optimizer</Label>
-                      <NativeSelect id="optimizer" value={trainingArgs.optimizer} onChange={(event) => setTrainingArg("optimizer", event.target.value)}>
-                        {["auto", "SGD", "Adam", "AdamW", "NAdam", "RAdam", "RMSProp"].map((optimizer) => (
-                          <NativeSelectOption key={optimizer} value={optimizer}>{optimizer}</NativeSelectOption>
+                <Dialog open={isConfigDialogOpen} onOpenChange={setIsConfigDialogOpen}>
+                  <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>YOLO training configuration</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-5">
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="saved-config">Saved config</Label>
+                          <NativeSelect id="saved-config" value={selectedConfigId} onChange={(event) => handleSelectConfig(event.target.value)}>
+                            <NativeSelectOption value="">New config</NativeSelectOption>
+                            {configs.map((config) => (
+                              <NativeSelectOption key={config.id} value={String(config.id)}>
+                                {config.name}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="config-name">Config name</Label>
+                          <Input id="config-name" value={configName} onChange={(event) => setConfigName(event.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="base-model">Base model</Label>
+                          <NativeSelect id="base-model" value={baseModel} onChange={(event) => setBaseModel(event.target.value)}>
+                            <NativeSelectOption value="">Select uploaded model</NativeSelectOption>
+                            {availableBaseModels.map((model) => (
+                              <NativeSelectOption key={model.id} value={`ai_model:${model.id}`}>
+                                {model.name}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="optimizer">Optimizer</Label>
+                          <NativeSelect id="optimizer" value={trainingArgs.optimizer} onChange={(event) => setTrainingArg("optimizer", event.target.value)}>
+                            {["auto", "SGD", "Adam", "AdamW", "NAdam", "RAdam", "RMSProp"].map((optimizer) => (
+                              <NativeSelectOption key={optimizer} value={optimizer}>{optimizer}</NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        </div>
+                        {[
+                          ["epochs", "Epochs"],
+                          ["imgsz", "Image size"],
+                          ["batch", "Batch"],
+                          ["patience", "Patience"],
+                          ["workers", "Workers"],
+                          ["seed", "Seed"],
+                          ["lr0", "Initial LR"],
+                          ["lrf", "Final LR factor"],
+                          ["momentum", "Momentum"],
+                          ["weight_decay", "Weight decay"],
+                          ["warmup_epochs", "Warmup epochs"],
+                        ].map(([key, label]) => (
+                          <div key={key} className="space-y-2">
+                            <Label htmlFor={`arg-${key}`}>{label}</Label>
+                            <Input
+                              id={`arg-${key}`}
+                              type="number"
+                              step={["lr0", "lrf", "momentum", "weight_decay", "warmup_epochs"].includes(key) ? "0.001" : "1"}
+                              value={trainingArgs[key]}
+                              onChange={(event) => setTrainingArg(key, Number(event.target.value))}
+                            />
+                          </div>
                         ))}
-                      </NativeSelect>
+                        {["cos_lr", "cache", "pretrained", "amp"].map((key) => (
+                          <div key={key} className="space-y-2">
+                            <Label htmlFor={`arg-${key}`}>{key}</Label>
+                            <NativeSelect
+                              id={`arg-${key}`}
+                              value={boolToText(trainingArgs[key])}
+                              onChange={(event) => setTrainingArg(key, event.target.value === "true")}
+                            >
+                              <NativeSelectOption value="true">true</NativeSelectOption>
+                              <NativeSelectOption value="false">false</NativeSelectOption>
+                            </NativeSelect>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+                        <p className="text-xs text-slate-500">
+                          {selectedConfig ? `Saved config: ${selectedConfig.name}` : "This config is not saved yet."}
+                          {selectedModel ? ` Base model: ${selectedModel.name}.` : ""}
+                        </p>
+                        <Button onClick={handleSaveConfig} disabled={isSavingConfig}>
+                          {isSavingConfig ? "Saving..." : selectedConfigId ? "Update config" : "Save config"}
+                        </Button>
+                      </div>
                     </div>
-                    {[
-                      ["epochs", "Epochs"],
-                      ["imgsz", "Image size"],
-                      ["batch", "Batch"],
-                      ["patience", "Patience"],
-                      ["workers", "Workers"],
-                      ["seed", "Seed"],
-                      ["lr0", "Initial LR"],
-                      ["lrf", "Final LR factor"],
-                      ["momentum", "Momentum"],
-                      ["weight_decay", "Weight decay"],
-                      ["warmup_epochs", "Warmup epochs"],
-                    ].map(([key, label]) => (
-                      <div key={key} className="space-y-2">
-                        <Label htmlFor={`arg-${key}`}>{label}</Label>
-                        <Input
-                          id={`arg-${key}`}
-                          type="number"
-                          step={["lr0", "lrf", "momentum", "weight_decay", "warmup_epochs"].includes(key) ? "0.001" : "1"}
-                          value={trainingArgs[key]}
-                          onChange={(event) => setTrainingArg(key, Number(event.target.value))}
-                        />
-                      </div>
-                    ))}
-                    {["cos_lr", "cache", "pretrained", "amp"].map((key) => (
-                      <div key={key} className="space-y-2">
-                        <Label htmlFor={`arg-${key}`}>{key}</Label>
-                        <NativeSelect
-                          id={`arg-${key}`}
-                          value={boolToText(trainingArgs[key])}
-                          onChange={(event) => setTrainingArg(key, event.target.value === "true")}
-                        >
-                          <NativeSelectOption value="true">true</NativeSelectOption>
-                          <NativeSelectOption value="false">false</NativeSelectOption>
-                        </NativeSelect>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-5 flex flex-wrap items-center gap-3">
-                    <Button onClick={handleSaveConfig} disabled={isSavingConfig}>
-                      {isSavingConfig ? "Saving..." : "Save config"}
-                    </Button>
-                    <NativeSelect
-                      value={selectedConfigId}
-                      onChange={(event) => setSelectedConfigId(event.target.value)}
-                      className="w-64"
-                    >
-                      <NativeSelectOption value="">Select saved config</NativeSelectOption>
-                      {configs.map((config) => (
-                        <NativeSelectOption key={config.id} value={String(config.id)}>
-                          {config.name} · {config.base_model}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                    <Button variant="secondary" onClick={handleQueueTraining} disabled={isQueueingJob || !selectedConfigId}>
-                      <Play />
-                      {isQueueingJob ? "Queueing..." : "Start training"}
-                    </Button>
-                  </div>
-                </Card>
+                  </DialogContent>
+                </Dialog>
 
                 <Card className="border-slate-200 bg-white p-5">
                   <div className="flex items-center justify-between">
                     <h3 className="text-base font-semibold text-slate-900">Training jobs</h3>
                     <Button variant="ghost" size="sm" onClick={() => refreshActivePipeline()}>
-                      <RefreshCcw className="h-4 w-4" />
+                      <RefreshCw className="h-4 w-4" />
                       Refresh
                     </Button>
                   </div>

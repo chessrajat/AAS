@@ -855,15 +855,29 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
-  createTrainingJob: async (pipelineId, configId) => {
+  updateTrainingConfig: async (configId, payload) => {
     set({ error: null });
-    if (!pipelineId || !configId) {
-      return { ok: false, error: "Missing training configuration" };
+    if (!configId) {
+      return { ok: false, error: "Missing training configuration id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/train/configs/${configId}/`, payload);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update training configuration");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingJob: async (pipelineId, configId, datasetId) => {
+    set({ error: null });
+    if (!pipelineId || !configId || !datasetId) {
+      return { ok: false, error: "Missing training configuration or dataset" };
     }
     try {
       const response = await apiClient.post(
         `/api/train/pipelines/${pipelineId}/jobs/`,
-        { config: configId },
+        { config: configId, dataset: datasetId },
       );
       return { ok: true, data: response.data };
     } catch (error) {
