@@ -145,6 +145,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 TRAINING_WORK_DIR = os.getenv('TRAINING_WORK_DIR', str(BASE_DIR / 'training_work'))
+SERVE_MEDIA_FILES = os.getenv('SERVE_MEDIA_FILES', 'False').lower() in {'1', 'true', 'yes', 'on'}
 
 if os.getenv('USE_S3_STORAGE', 'False').lower() in {'1', 'true', 'yes', 'on'}:
     AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')

@@ -8,6 +8,12 @@ if [[ -n "${POSTGRES_DB:-}" ]]; then
   done
 fi
 
-python manage.py migrate --noinput
-python manage.py collectstatic --noinput
-exec gunicorn aas.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 180
+if [[ "${RUN_MIGRATIONS:-false}" =~ ^([Tt]rue|1|yes|on)$ ]]; then
+  python manage.py migrate --noinput
+fi
+
+if [[ "${RUN_COLLECTSTATIC:-false}" =~ ^([Tt]rue|1|yes|on)$ ]]; then
+  python manage.py collectstatic --noinput
+fi
+
+exec "$@"
