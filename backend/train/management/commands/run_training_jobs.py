@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand, CommandError
 
 import socket
+import time
 
 from train.models import TrainingJob
 from train.runner import claim_next_training_job, run_training_job
@@ -27,16 +28,50 @@ class Command(BaseCommand):
             default=None,
             help='Worker id to store on claimed jobs.',
         )
+        parser.add_argument(
+            '--loop',
+            action='store_true',
+            help='Keep polling for pending jobs instead of exiting after one batch.',
+        )
+        parser.add_argument(
+            '--poll-interval',
+            type=float,
+            default=5,
+            help='Seconds to wait between polling attempts in loop mode.',
+        )
 
     def handle(self, *args, **options):
         limit = options['limit']
         if limit < 1:
             raise CommandError('--limit must be at least 1.')
+        if options['poll_interval'] < 0:
+            raise CommandError('--poll-interval cannot be negative.')
 
         worker_id = options['worker_id'] or f'{socket.gethostname()}:{id(self)}'
         job_id = options['job_id']
-        ran_count = 0
+        loop = options['loop']
+        poll_interval = options['poll_interval']
 
+        while True:
+            try:
+                ran_count = self._run_batch(limit, worker_id, job_id)
+            except KeyboardInterrupt:
+                self.stdout.write(self.style.WARNING('Training worker stopped.'))
+                break
+            running_jobs = TrainingJob.objects.filter(status=TrainingJob.STATUS_RUNNING).count()
+            self.stdout.write(f'Ran {ran_count} job(s). {running_jobs} job(s) currently running.')
+
+            if not loop or job_id is not None:
+                break
+
+            try:
+                time.sleep(poll_interval)
+            except KeyboardInterrupt:
+                self.stdout.write(self.style.WARNING('Training worker stopped.'))
+                break
+
+    def _run_batch(self, limit, worker_id, job_id):
+        ran_count = 0
         for _ in range(limit):
             job = claim_next_training_job(worker_id=worker_id, job_id=job_id)
             if not job:
@@ -55,6 +90,4 @@ class Command(BaseCommand):
             ran_count += 1
             if job_id is not None:
                 break
-
-        running_jobs = TrainingJob.objects.filter(status=TrainingJob.STATUS_RUNNING).count()
-        self.stdout.write(f'Ran {ran_count} job(s). {running_jobs} job(s) currently running.')
+        return ran_count

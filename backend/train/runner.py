@@ -4,6 +4,7 @@ import shutil
 import socket
 import random
 
+from django.core.files import File
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -38,16 +39,34 @@ def _as_json_safe(value):
     return str(value)
 
 
-def _copy_file(source_path, destination_path):
+def _copy_field_file(field_file, destination_path):
     destination_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_path, destination_path)
+    opened_file = field_file.open('rb')
+    source = opened_file or field_file
+    try:
+        with destination_path.open('wb') as destination:
+            if hasattr(source, 'chunks'):
+                for chunk in source.chunks():
+                    destination.write(chunk)
+            else:
+                shutil.copyfileobj(source, destination)
+    finally:
+        if hasattr(source, 'close'):
+            source.close()
 
 
-def _resolve_base_model(base_model):
+def _job_work_dir(job):
+    return Path(settings.TRAINING_WORK_DIR) / 'jobs' / str(job.id)
+
+
+def _resolve_base_model(base_model, work_dir):
     if str(base_model).startswith('ai_model:'):
         model_id = str(base_model).split(':', 1)[1]
         ai_model = AIModel.objects.get(id=model_id)
-        return ai_model.file.path
+        model_name = Path(ai_model.file.name).name or f'ai-model-{model_id}.pt'
+        model_path = work_dir / 'base-models' / model_name
+        _copy_field_file(ai_model.file, model_path)
+        return str(model_path)
     return base_model
 
 
@@ -112,7 +131,7 @@ def materialize_yolo_dataset(job):
         TrainingDatasetItem.SPLIT_VAL: 0,
         TrainingDatasetItem.SPLIT_TEST: 0,
     }
-    dataset_dir = Path(settings.MEDIA_ROOT) / 'training' / 'jobs' / str(job.id) / 'dataset'
+    dataset_dir = _job_work_dir(job) / 'dataset'
     if dataset_dir.exists():
         shutil.rmtree(dataset_dir)
 
@@ -123,15 +142,15 @@ def materialize_yolo_dataset(job):
     for item in items:
         if item.split not in split_counts:
             continue
-        if not item.image or not Path(item.image.path).exists():
+        if not item.image:
             raise TrainingRunnerError(f'Missing image file for dataset item {item.id}.')
 
         image_suffix = Path(item.original_image_name or item.image.name).suffix or Path(item.image.name).suffix
         image_name = f'item-{item.id}{image_suffix}'
         label_name = f'item-{item.id}.txt'
-        _copy_file(Path(item.image.path), dataset_dir / 'images' / item.split / image_name)
-        if item.label and Path(item.label.path).exists():
-            _copy_file(Path(item.label.path), dataset_dir / 'labels' / item.split / label_name)
+        _copy_field_file(item.image, dataset_dir / 'images' / item.split / image_name)
+        if item.label:
+            _copy_field_file(item.label, dataset_dir / 'labels' / item.split / label_name)
         else:
             (dataset_dir / 'labels' / item.split / label_name).write_text('', encoding='utf-8')
         split_counts[item.split] += 1
@@ -167,7 +186,7 @@ def materialize_reusable_yolo_dataset(job):
     if val_count == 0:
         raise TrainingRunnerError('Training split has no validation images.')
 
-    dataset_dir = Path(settings.MEDIA_ROOT) / 'training' / 'jobs' / str(job.id) / 'dataset'
+    dataset_dir = _job_work_dir(job) / 'dataset'
     if dataset_dir.exists():
         shutil.rmtree(dataset_dir)
 
@@ -188,16 +207,16 @@ def materialize_reusable_yolo_dataset(job):
         else:
             split = TrainingDatasetItem.SPLIT_TEST
 
-        if not asset.image or not Path(asset.image.path).exists():
+        if not asset.image:
             raise TrainingRunnerError(f'Missing image file for dataset asset {asset.id}.')
-        if not asset.label or not Path(asset.label.path).exists():
+        if not asset.label:
             raise TrainingRunnerError(f'Missing label file for dataset asset {asset.id}.')
 
         image_suffix = Path(asset.original_image_name or asset.image.name).suffix or Path(asset.image.name).suffix
         image_name = f'asset-{asset.id}{image_suffix}'
         label_name = f'asset-{asset.id}.txt'
-        _copy_file(Path(asset.image.path), dataset_dir / 'images' / split / image_name)
-        _copy_file(Path(asset.label.path), dataset_dir / 'labels' / split / label_name)
+        _copy_field_file(asset.image, dataset_dir / 'images' / split / image_name)
+        _copy_field_file(asset.label, dataset_dir / 'labels' / split / label_name)
         split_counts[split] += 1
 
     data_yaml_path = _write_data_yaml(job, dataset_dir)
@@ -226,21 +245,16 @@ def _store_artifact(job, artifact_type, source_path):
     if not source.exists() or not source.is_file():
         return None
 
-    artifact_dir = Path(settings.MEDIA_ROOT) / 'training' / 'jobs' / str(job.id) / 'artifacts'
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    destination = artifact_dir / source.name
-    if source.resolve() != destination.resolve():
-        shutil.copy2(source, destination)
-
-    relative_name = str(destination.relative_to(settings.MEDIA_ROOT))
-    artifact, _ = TrainingArtifact.objects.update_or_create(
+    artifact, _ = TrainingArtifact.objects.get_or_create(
         job=job,
         artifact_type=artifact_type,
-        defaults={
-            'file': relative_name,
-            'metadata': {'source_path': str(source)},
-        },
     )
+    if artifact.file:
+        artifact.file.delete(save=False)
+    with source.open('rb') as source_file:
+        artifact.file.save(source.name, File(source_file), save=False)
+    artifact.metadata = {'source_path': str(source)}
+    artifact.save(update_fields=['file', 'metadata'])
     return artifact
 
 
@@ -256,13 +270,14 @@ def _store_training_artifacts(job, run_dir):
 def run_training_job(job):
     job = TrainingJob.objects.select_related('pipeline', 'config', 'dataset').get(id=job.id)
     try:
+        work_dir = _job_work_dir(job)
         dataset_dir, data_yaml_path = materialize_yolo_dataset(job)
         config_args = dict(job.config.args or {})
         total_epochs = int(config_args.get('epochs') or job.total_epochs or 100)
         config_args['epochs'] = total_epochs
         final_args = {
             'data': str(data_yaml_path),
-            'project': str(Path(settings.MEDIA_ROOT) / 'training' / 'runs'),
+            'project': str(work_dir / 'runs'),
             'name': f'job-{job.id}',
             'exist_ok': True,
             **config_args,
@@ -274,7 +289,7 @@ def run_training_job(job):
         }
         job.save(update_fields=['total_epochs', 'final_args'])
 
-        model = YOLO(_resolve_base_model(job.config.base_model))
+        model = YOLO(_resolve_base_model(job.config.base_model, work_dir))
         model.add_callback('on_fit_epoch_end', lambda trainer: _save_epoch_metrics(job, trainer))
         result = model.train(**final_args)
         trainer = getattr(model, 'trainer', None)
