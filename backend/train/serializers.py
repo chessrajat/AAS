@@ -165,6 +165,7 @@ class TrainingJobSerializer(serializers.ModelSerializer):
             'id',
             'pipeline',
             'config',
+            'dataset',
             'config_detail',
             'status',
             'queued_at',

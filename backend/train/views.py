@@ -717,7 +717,7 @@ class TrainingPipelineViewSet(viewsets.ModelViewSet):
         pipeline = self.get_object()
         if request.method.lower() == 'get':
             serializer = TrainingJobSerializer(
-                pipeline.jobs.select_related('config')
+                pipeline.jobs.select_related('config', 'dataset')
                 .prefetch_related('artifacts')
                 .all()
                 .order_by('-queued_at'),
@@ -734,19 +734,27 @@ class TrainingPipelineViewSet(viewsets.ModelViewSet):
                 {'detail': 'Training configuration does not belong to this pipeline.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        split_counts = pipeline.items.values('split').annotate(count=Count('id'))
-        counts_by_split = {item['split']: item['count'] for item in split_counts}
-        if counts_by_split.get(TrainingDatasetItem.SPLIT_UNASSIGNED, 0):
+        dataset = serializer.validated_data.get('dataset')
+        if not dataset:
             return Response(
-                {'detail': 'Apply train/validation/test split before starting training.'},
+                {'detail': 'Select a training dataset before starting training.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if counts_by_split.get(TrainingDatasetItem.SPLIT_TRAIN, 0) == 0:
+        asset_count = dataset.assets.count()
+        if asset_count == 0:
+            return Response(
+                {'detail': 'Selected training dataset has no files.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        split_config, _ = TrainingSplitConfig.objects.get_or_create(pipeline=pipeline)
+        train_count = int(asset_count * split_config.train_percent / 100)
+        val_count = int(asset_count * split_config.val_percent / 100)
+        if train_count == 0:
             return Response(
                 {'detail': 'Training split has no train images.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if counts_by_split.get(TrainingDatasetItem.SPLIT_VAL, 0) == 0:
+        if val_count == 0:
             return Response(
                 {'detail': 'Training split has no validation images.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -754,6 +762,7 @@ class TrainingPipelineViewSet(viewsets.ModelViewSet):
         job = TrainingJob.objects.create(
             pipeline=pipeline,
             config=config,
+            dataset=dataset,
             total_epochs=int((config.args or {}).get('epochs') or 0),
             final_args={
                 'model': config.base_model,
@@ -796,6 +805,39 @@ class TrainingDatasetClassViewSet(
             )
 
 
+class TrainingConfigViewSet(
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = TrainingConfig.objects.select_related('pipeline').all()
+    serializer_class = TrainingConfigSerializer
+    permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
+    role_permissions = {
+        'update': MANAGE_TRAINING_ROLES,
+        'partial_update': MANAGE_TRAINING_ROLES,
+        'destroy': MANAGE_TRAINING_ROLES,
+    }
+
+    def update(self, request, *args, **kwargs):
+        try:
+            return super().update(request, *args, **kwargs)
+        except IntegrityError:
+            return Response(
+                {'detail': 'Configuration name must be unique within this pipeline.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def partial_update(self, request, *args, **kwargs):
+        try:
+            return super().partial_update(request, *args, **kwargs)
+        except IntegrityError:
+            return Response(
+                {'detail': 'Configuration name must be unique within this pipeline.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
 class TrainingDatasetItemViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
     queryset = TrainingDatasetItem.objects.select_related('pipeline').all()
     serializer_class = TrainingDatasetItemSerializer
@@ -807,7 +849,7 @@ class TrainingDatasetItemViewSet(mixins.DestroyModelMixin, viewsets.GenericViewS
 
 class TrainingJobViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     queryset = (
-        TrainingJob.objects.select_related('pipeline', 'config')
+        TrainingJob.objects.select_related('pipeline', 'config', 'dataset')
         .prefetch_related('artifacts')
         .all()
     )

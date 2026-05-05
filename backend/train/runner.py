@@ -2,11 +2,14 @@ from pathlib import Path
 
 import shutil
 import socket
+import random
 
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from ultralytics import YOLO
+
+from annotate.models import AIModel
 
 from .models import (
     TrainingArtifact,
@@ -38,6 +41,14 @@ def _as_json_safe(value):
 def _copy_file(source_path, destination_path):
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_path, destination_path)
+
+
+def _resolve_base_model(base_model):
+    if str(base_model).startswith('ai_model:'):
+        model_id = str(base_model).split(':', 1)[1]
+        ai_model = AIModel.objects.get(id=model_id)
+        return ai_model.file.path
+    return base_model
 
 
 def claim_next_training_job(worker_id=None, job_id=None):
@@ -87,6 +98,9 @@ def _write_data_yaml(job, dataset_dir):
 
 
 def materialize_yolo_dataset(job):
+    if job.dataset_id:
+        return materialize_reusable_yolo_dataset(job)
+
     items = list(job.pipeline.items.all().order_by('id'))
     if not items:
         raise TrainingRunnerError('Training pipeline has no uploaded dataset items.')
@@ -126,6 +140,65 @@ def materialize_yolo_dataset(job):
         raise TrainingRunnerError('Training split has no train images.')
     if split_counts[TrainingDatasetItem.SPLIT_VAL] == 0:
         raise TrainingRunnerError('Training split has no validation images.')
+
+    data_yaml_path = _write_data_yaml(job, dataset_dir)
+    job.dataset_yaml_path = str(data_yaml_path)
+    job.save(update_fields=['dataset_yaml_path'])
+    return dataset_dir, data_yaml_path
+
+
+def materialize_reusable_yolo_dataset(job):
+    assets = list(job.dataset.assets.all().order_by('id'))
+    if not assets:
+        raise TrainingRunnerError('Selected training dataset has no files.')
+
+    split_config = getattr(job.pipeline, 'split_config', None)
+    train_percent = getattr(split_config, 'train_percent', 80)
+    val_percent = getattr(split_config, 'val_percent', 10)
+    seed = getattr(split_config, 'seed', 42)
+
+    rng = random.Random(seed)
+    rng.shuffle(assets)
+    total = len(assets)
+    train_count = int(total * train_percent / 100)
+    val_count = int(total * val_percent / 100)
+    if train_count == 0:
+        raise TrainingRunnerError('Training split has no train images.')
+    if val_count == 0:
+        raise TrainingRunnerError('Training split has no validation images.')
+
+    dataset_dir = Path(settings.MEDIA_ROOT) / 'training' / 'jobs' / str(job.id) / 'dataset'
+    if dataset_dir.exists():
+        shutil.rmtree(dataset_dir)
+
+    split_counts = {
+        TrainingDatasetItem.SPLIT_TRAIN: 0,
+        TrainingDatasetItem.SPLIT_VAL: 0,
+        TrainingDatasetItem.SPLIT_TEST: 0,
+    }
+    for split in split_counts:
+        (dataset_dir / 'images' / split).mkdir(parents=True, exist_ok=True)
+        (dataset_dir / 'labels' / split).mkdir(parents=True, exist_ok=True)
+
+    for index, asset in enumerate(assets):
+        if index < train_count:
+            split = TrainingDatasetItem.SPLIT_TRAIN
+        elif index < train_count + val_count:
+            split = TrainingDatasetItem.SPLIT_VAL
+        else:
+            split = TrainingDatasetItem.SPLIT_TEST
+
+        if not asset.image or not Path(asset.image.path).exists():
+            raise TrainingRunnerError(f'Missing image file for dataset asset {asset.id}.')
+        if not asset.label or not Path(asset.label.path).exists():
+            raise TrainingRunnerError(f'Missing label file for dataset asset {asset.id}.')
+
+        image_suffix = Path(asset.original_image_name or asset.image.name).suffix or Path(asset.image.name).suffix
+        image_name = f'asset-{asset.id}{image_suffix}'
+        label_name = f'asset-{asset.id}.txt'
+        _copy_file(Path(asset.image.path), dataset_dir / 'images' / split / image_name)
+        _copy_file(Path(asset.label.path), dataset_dir / 'labels' / split / label_name)
+        split_counts[split] += 1
 
     data_yaml_path = _write_data_yaml(job, dataset_dir)
     job.dataset_yaml_path = str(data_yaml_path)
@@ -181,7 +254,7 @@ def _store_training_artifacts(job, run_dir):
 
 
 def run_training_job(job):
-    job = TrainingJob.objects.select_related('pipeline', 'config').get(id=job.id)
+    job = TrainingJob.objects.select_related('pipeline', 'config', 'dataset').get(id=job.id)
     try:
         dataset_dir, data_yaml_path = materialize_yolo_dataset(job)
         config_args = dict(job.config.args or {})
@@ -201,7 +274,7 @@ def run_training_job(job):
         }
         job.save(update_fields=['total_epochs', 'final_args'])
 
-        model = YOLO(job.config.base_model)
+        model = YOLO(_resolve_base_model(job.config.base_model))
         model.add_callback('on_fit_epoch_end', lambda trainer: _save_epoch_metrics(job, trainer))
         result = model.train(**final_args)
         trainer = getattr(model, 'trainer', None)

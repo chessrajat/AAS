@@ -254,6 +254,13 @@ class TrainingJob(models.Model):
         related_name='jobs',
         on_delete=models.PROTECT,
     )
+    dataset = models.ForeignKey(
+        TrainingDataset,
+        related_name='jobs',
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     queued_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
