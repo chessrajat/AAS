@@ -10,13 +10,16 @@ export const useApiStore = create((set) => ({
   models: [],
   users: [],
   trainingPipelines: [],
+  trainingDatasets: [],
   isLoadingProjects: false,
   isLoadingModels: false,
   isLoadingUsers: false,
   isLoadingTrainingPipelines: false,
+  isLoadingTrainingDatasets: false,
   isCreatingProject: false,
   isCreatingModel: false,
   isCreatingTrainingPipeline: false,
+  isCreatingTrainingDataset: false,
   error: null,
   clearError: () => set({ error: null }),
   fetchProjects: async (token) => {
@@ -571,6 +574,108 @@ export const useApiStore = create((set) => ({
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to load training pipelines");
       set({ isLoadingTrainingPipelines: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingDatasets: async () => {
+    set({ isLoadingTrainingDatasets: true, error: null });
+    try {
+      const response = await apiClient.get("/api/train/datasets/");
+      set({ isLoadingTrainingDatasets: false, trainingDatasets: response.data });
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training datasets");
+      set({ isLoadingTrainingDatasets: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingDataset: async (payload) => {
+    set({ isCreatingTrainingDataset: true, error: null });
+    try {
+      const response = await apiClient.post("/api/train/datasets/", payload);
+      set((state) => ({
+        isCreatingTrainingDataset: false,
+        trainingDatasets: [response.data, ...state.trainingDatasets],
+      }));
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create training dataset");
+      set({ isCreatingTrainingDataset: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteTrainingDataset: async (datasetId) => {
+    set({ error: null });
+    if (!datasetId) {
+      return { ok: false, error: "Missing training dataset id" };
+    }
+    try {
+      await apiClient.delete(`/api/train/datasets/${datasetId}/`);
+      set((state) => ({
+        trainingDatasets: state.trainingDatasets.filter(
+          (dataset) => dataset.id !== datasetId,
+        ),
+      }));
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete training dataset");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingDatasetAssets: async (datasetId, page = 1) => {
+    set({ error: null });
+    if (!datasetId) {
+      return { ok: false, error: "Missing training dataset id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/train/datasets/${datasetId}/assets/`,
+        { params: { page } },
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load dataset assets");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadTrainingDatasetAssets: async (datasetId, images, labels) => {
+    set({ error: null });
+    if (!datasetId || !images || images.length === 0) {
+      return { ok: false, error: "No images selected" };
+    }
+    try {
+      const formData = new FormData();
+      Array.from(images).forEach((file) => formData.append("images", file));
+      Array.from(labels || []).forEach((file) => formData.append("labels", file));
+      const response = await uploadClient.post(
+        `/api/train/datasets/${datasetId}/assets/upload/`,
+        formData,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Dataset upload failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadTrainingDatasetZip: async (datasetId, archive) => {
+    set({ error: null });
+    if (!datasetId || !archive) {
+      return { ok: false, error: "No ZIP archive selected" };
+    }
+    try {
+      const formData = new FormData();
+      formData.append("archive", archive);
+      const response = await uploadClient.post(
+        `/api/train/datasets/${datasetId}/assets/upload-zip/`,
+        formData,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Dataset ZIP upload failed");
+      set({ error: message });
       return { ok: false, error: message };
     }
   },

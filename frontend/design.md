@@ -297,3 +297,30 @@ There are no raster images in the system aside from the favicon and OG share ima
 - **In-product TUI screenshots** beyond the marketing hero mockup are not in the captured set; the actual `opencode` terminal interface (full keybindings, panels, status bar) is not documented here.
 - **`/go` page** not extracted — the marketing page for the Go SDK likely shares the same chrome but introduces code-sample blocks not documented above.
 - **Form validation state styling** (success / error inline messages) not present in the captured surfaces.
+
+## App Extension: Training Datasets
+
+### Dataset Navigation
+
+**`training-dataset-list`**
+- Left column owns dataset identity, counts, selection, and destructive actions.
+- The selected row uses a stronger border and muted fill; every row keeps the asset count as a compact badge.
+- Delete is an icon button on the row and must open a confirmation dialog before removing the dataset.
+- Do not repeat the selected dataset header in the right content area.
+
+### Upload Panel
+
+**`training-dataset-upload-tabs`**
+- Upload mode is a two-option segmented control: `Individual Files` and `ZIP Archive`.
+- Active mode uses a black pill with white text; inactive mode sits on a light gray pill track.
+- Left rail label is uppercase `Configure Upload`; right side owns the upload controls.
+- The image/ZIP picker uses a dashed, rounded drop zone with an upload icon and concise selected-file feedback.
+- Label picker uses a rounded row with selected label count/name at left and an underlined `Browse` action at right.
+- Primary upload action is a full-width black rounded pill labeled `Upload Dataset`.
+
+### Dataset Files
+
+**`training-dataset-file-list`**
+- File pairs render in a bounded scroll area.
+- API pagination loads 25 assets per page.
+- `Load more` appears below the scroll area only when another page exists and appends results.

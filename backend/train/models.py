@@ -71,6 +71,67 @@ class TrainingDatasetClass(models.Model):
         return f'{self.pipeline.name}: {self.name}'
 
 
+class TrainingDataset(models.Model):
+    name = models.CharField(max_length=200, unique=True)
+    description = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='created_training_datasets',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+def reusable_training_image_upload_to(instance, filename):
+    ext = filename.split('.')[-1] if '.' in filename else ''
+    name = f'{uuid.uuid4()}.{ext}' if ext else f'{uuid.uuid4()}'
+    return f'training/datasets/{instance.dataset_id}/images/{name}'
+
+
+def reusable_training_label_upload_to(instance, filename):
+    ext = filename.split('.')[-1] if '.' in filename else ''
+    name = f'{uuid.uuid4()}.{ext}' if ext else f'{uuid.uuid4()}'
+    return f'training/datasets/{instance.dataset_id}/labels/{name}'
+
+
+class TrainingDatasetAsset(models.Model):
+    dataset = models.ForeignKey(
+        TrainingDataset,
+        related_name='assets',
+        on_delete=models.CASCADE,
+    )
+    image = models.ImageField(upload_to=reusable_training_image_upload_to)
+    label = models.FileField(upload_to=reusable_training_label_upload_to)
+    original_image_name = models.CharField(max_length=255)
+    original_label_name = models.CharField(max_length=255)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    validation_errors = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['dataset', 'original_image_name'],
+                name='unique_training_dataset_image_name',
+            ),
+            models.UniqueConstraint(
+                fields=['dataset', 'original_label_name'],
+                name='unique_training_dataset_label_name',
+            ),
+        ]
+        ordering = ['id']
+
+    def __str__(self) -> str:
+        return f'{self.dataset.name}: {self.original_image_name}'
+
+
 def training_image_upload_to(instance, filename):
     ext = filename.split('.')[-1] if '.' in filename else ''
     name = f'{uuid.uuid4()}.{ext}' if ext else f'{uuid.uuid4()}'

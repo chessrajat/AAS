@@ -8,6 +8,7 @@ import { useTheme } from "next-themes";
 import {
   ChevronUp,
   Cpu,
+  Database,
   FolderKanban,
   LogOut,
   Moon,
@@ -56,6 +57,7 @@ export default function HomeSidebar() {
   const isProjects = pathname === "/" || pathname.startsWith("/projects/");
   const isModels = pathname === "/models";
   const isTraining = pathname === "/training";
+  const isTrainingDatasets = pathname === "/training-datasets";
   const isUsers = pathname === "/users";
   const isDarkTheme = resolvedTheme === "dark";
 
@@ -120,6 +122,14 @@ export default function HomeSidebar() {
                     <Link href="/training">
                       <Pickaxe />
                       <span>Training</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isTrainingDatasets}>
+                    <Link href="/training-datasets">
+                      <Database />
+                      <span>Training Datasets</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

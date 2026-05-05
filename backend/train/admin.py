@@ -3,6 +3,8 @@ from django.contrib import admin
 from .models import (
     TrainingArtifact,
     TrainingConfig,
+    TrainingDataset,
+    TrainingDatasetAsset,
     TrainingDatasetClass,
     TrainingDatasetItem,
     TrainingEpochMetric,
@@ -10,6 +12,26 @@ from .models import (
     TrainingPipeline,
     TrainingSplitConfig,
 )
+
+
+class TrainingDatasetAssetInline(admin.TabularInline):
+    model = TrainingDatasetAsset
+    extra = 0
+    readonly_fields = ('width', 'height', 'created_at')
+
+
+@admin.register(TrainingDataset)
+class TrainingDatasetAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'created_by', 'created_at', 'updated_at')
+    search_fields = ('name', 'description')
+    inlines = (TrainingDatasetAssetInline,)
+
+
+@admin.register(TrainingDatasetAsset)
+class TrainingDatasetAssetAdmin(admin.ModelAdmin):
+    list_display = ('id', 'dataset', 'original_image_name', 'original_label_name', 'width', 'height', 'created_at')
+    list_filter = ('dataset', 'created_at')
+    search_fields = ('dataset__name', 'original_image_name', 'original_label_name')
 
 
 class TrainingDatasetClassInline(admin.TabularInline):

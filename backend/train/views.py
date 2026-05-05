@@ -17,6 +17,7 @@ from pathlib import Path
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404, HttpResponse
+from django.core.paginator import Paginator
 from django.utils import timezone
 
 from accounts.models import UserProfile
@@ -25,6 +26,8 @@ from annotate.permissions import ALL_PROJECT_ROLES, HasAnnotateRolePermission
 from .models import (
     TrainingConfig,
     TrainingArtifact,
+    TrainingDataset,
+    TrainingDatasetAsset,
     TrainingDatasetClass,
     TrainingDatasetItem,
     TrainingJob,
@@ -34,6 +37,8 @@ from .models import (
 from .serializers import (
     TrainingConfigSerializer,
     TrainingArtifactSerializer,
+    TrainingDatasetAssetSerializer,
+    TrainingDatasetSerializer,
     TrainingDatasetClassSerializer,
     TrainingDatasetItemSerializer,
     TrainingJobSerializer,
@@ -52,6 +57,10 @@ IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
 
 def _stem_from_name(name):
     return Path(name).stem
+
+
+def _base_name(name):
+    return Path(str(name).replace('\\', '/')).name
 
 
 def _create_training_item(pipeline, image_file, label_file=None, image_name=None, label_name=''):
@@ -80,6 +89,79 @@ def _create_training_item(pipeline, image_file, label_file=None, image_name=None
         height=height,
         validation_errors=validation_errors,
     )
+
+
+def _create_dataset_asset(dataset, image_file, label_file, image_name=None, label_name=None):
+    image_name = _base_name(image_name or getattr(image_file, 'name', ''))
+    label_name = _base_name(label_name or getattr(label_file, 'name', ''))
+    try:
+        with PilImage.open(image_file) as opened_image:
+            width, height = opened_image.size
+    except (UnidentifiedImageError, OSError):
+        raise ValueError(f'Invalid image file: {image_name or "unknown"}.')
+
+    if hasattr(image_file, 'seek'):
+        image_file.seek(0)
+    if hasattr(label_file, 'seek'):
+        label_file.seek(0)
+
+    return TrainingDatasetAsset.objects.create(
+        dataset=dataset,
+        image=image_file,
+        label=label_file,
+        original_image_name=image_name,
+        original_label_name=label_name,
+        width=width,
+        height=height,
+    )
+
+
+def _find_duplicates(values):
+    seen = set()
+    duplicates = []
+    for value in values:
+        if value in seen and value not in duplicates:
+            duplicates.append(value)
+        seen.add(value)
+    return duplicates
+
+
+def _validate_dataset_upload(dataset, image_names, label_names):
+    image_names = [_base_name(name) for name in image_names]
+    label_names = [_base_name(name) for name in label_names]
+    duplicate_images = _find_duplicates(image_names)
+    if duplicate_images:
+        return f'Duplicate image filename in upload: {duplicate_images[0]}.'
+    duplicate_labels = _find_duplicates(label_names)
+    if duplicate_labels:
+        return f'Duplicate label filename in upload: {duplicate_labels[0]}.'
+
+    image_stems = {_stem_from_name(name) for name in image_names}
+    label_stems = {_stem_from_name(name) for name in label_names}
+    missing_labels = sorted(image_stems - label_stems)
+    if missing_labels:
+        return f'Matching label file not found for image: {missing_labels[0]}.'
+    extra_labels = sorted(label_stems - image_stems)
+    if extra_labels:
+        return f'Label file has no matching image: {extra_labels[0]}.'
+    if len(image_names) != len(label_names):
+        return 'Image and label counts must be equal.'
+
+    existing_image = (
+        dataset.assets.filter(original_image_name__in=image_names)
+        .values_list('original_image_name', flat=True)
+        .first()
+    )
+    if existing_image:
+        return f'Image filename already exists in this dataset: {existing_image}.'
+    existing_label = (
+        dataset.assets.filter(original_label_name__in=label_names)
+        .values_list('original_label_name', flat=True)
+        .first()
+    )
+    if existing_label:
+        return f'Label filename already exists in this dataset: {existing_label}.'
+    return None
 
 
 def _is_safe_zip_member(member_name):
@@ -123,6 +205,218 @@ def pipeline_queryset():
         )
         .order_by('-updated_at')
     )
+
+
+class TrainingDatasetViewSet(viewsets.ModelViewSet):
+    serializer_class = TrainingDatasetSerializer
+    permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
+    role_permissions = {
+        'list': ALL_PROJECT_ROLES,
+        'retrieve': ALL_PROJECT_ROLES,
+        'create': MANAGE_TRAINING_ROLES,
+        'update': MANAGE_TRAINING_ROLES,
+        'partial_update': MANAGE_TRAINING_ROLES,
+        'destroy': MANAGE_TRAINING_ROLES,
+        'assets': ALL_PROJECT_ROLES,
+        'upload_assets': MANAGE_TRAINING_ROLES,
+        'upload_zip': MANAGE_TRAINING_ROLES,
+    }
+
+    def get_queryset(self):
+        return (
+            TrainingDataset.objects.annotate(asset_count=Count('assets', distinct=True))
+            .order_by('-updated_at')
+        )
+
+    @action(detail=True, methods=['get'], url_path='assets')
+    def assets(self, request, pk=None):
+        dataset = self.get_object()
+        page_number = request.query_params.get('page') or 1
+        paginator = Paginator(dataset.assets.all().order_by('id'), 25)
+        page = paginator.get_page(page_number)
+        serializer = TrainingDatasetAssetSerializer(
+            page.object_list,
+            many=True,
+            context={'request': request},
+        )
+        return Response({
+            'count': paginator.count,
+            'page': page.number,
+            'page_size': 25,
+            'total_pages': paginator.num_pages,
+            'next_page': page.next_page_number() if page.has_next() else None,
+            'previous_page': page.previous_page_number() if page.has_previous() else None,
+            'results': serializer.data,
+        })
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='assets/upload',
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_assets(self, request, pk=None):
+        dataset = self.get_object()
+        images = request.FILES.getlist('images')
+        labels = request.FILES.getlist('labels')
+        if not images:
+            return Response(
+                {'detail': 'No images provided.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not labels:
+            return Response(
+                {'detail': 'No labels provided.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        validation_error = _validate_dataset_upload(
+            dataset,
+            [image.name for image in images],
+            [label.name for label in labels],
+        )
+        if validation_error:
+            return Response(
+                {'detail': validation_error},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        labels_by_stem = {_stem_from_name(label.name): label for label in labels}
+        created = []
+        try:
+            with transaction.atomic():
+                for image_file in images:
+                    label_file = labels_by_stem[_stem_from_name(image_file.name)]
+                    created.append(
+                        _create_dataset_asset(
+                            dataset,
+                            image_file,
+                            label_file,
+                            image_name=image_file.name,
+                            label_name=label_file.name,
+                        )
+                    )
+        except (IntegrityError, ValueError) as exc:
+            return Response(
+                {'detail': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = TrainingDatasetAssetSerializer(
+            created,
+            many=True,
+            context={'request': request},
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='assets/upload-zip',
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_zip(self, request, pk=None):
+        dataset = self.get_object()
+        archive = request.FILES.get('archive')
+        if not archive:
+            return Response(
+                {'detail': 'No archive provided.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created = []
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                archive_path = temp_path / 'dataset.zip'
+                with archive_path.open('wb') as destination:
+                    for chunk in archive.chunks():
+                        destination.write(chunk)
+
+                extracted_dir = temp_path / 'extracted'
+                try:
+                    with zipfile.ZipFile(archive_path) as zip_file:
+                        members = zip_file.infolist()
+                        unsafe = [
+                            member.filename
+                            for member in members
+                            if not _is_safe_zip_member(member.filename)
+                        ]
+                        if unsafe:
+                            return Response(
+                                {'detail': 'Archive contains unsafe paths.'},
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
+                        zip_file.extractall(extracted_dir)
+                except zipfile.BadZipFile:
+                    return Response(
+                        {'detail': 'Invalid ZIP archive.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                image_paths = [
+                    path
+                    for path in extracted_dir.rglob('*')
+                    if path.is_file()
+                    and path.suffix.lower() in IMAGE_EXTENSIONS
+                    and 'images' in path.relative_to(extracted_dir).parts
+                ]
+                label_paths = [
+                    path
+                    for path in extracted_dir.rglob('*.txt')
+                    if path.is_file()
+                    and 'labels' in path.relative_to(extracted_dir).parts
+                ]
+                if not image_paths:
+                    return Response(
+                        {'detail': 'Archive contains no images under an images/ folder.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                validation_error = _validate_dataset_upload(
+                    dataset,
+                    [path.name for path in image_paths],
+                    [path.name for path in label_paths],
+                )
+                if validation_error:
+                    return Response(
+                        {'detail': validation_error},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                labels_by_stem = {path.stem: path for path in label_paths}
+                try:
+                    with transaction.atomic():
+                        for image_path in sorted(image_paths):
+                            label_path = labels_by_stem[image_path.stem]
+                            with image_path.open('rb') as image_file:
+                                image_django_file = File(image_file, name=image_path.name)
+                                with label_path.open('rb') as label_file:
+                                    label_django_file = File(label_file, name=label_path.name)
+                                    created.append(
+                                        _create_dataset_asset(
+                                            dataset,
+                                            image_django_file,
+                                            label_django_file,
+                                            image_name=image_path.name,
+                                            label_name=label_path.name,
+                                        )
+                                    )
+                except (IntegrityError, ValueError) as exc:
+                    return Response(
+                        {'detail': str(exc)},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        finally:
+            if hasattr(archive, 'seek'):
+                archive.seek(0)
+
+        serializer = TrainingDatasetAssetSerializer(
+            created,
+            many=True,
+            context={'request': request},
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class TrainingPipelineViewSet(viewsets.ModelViewSet):

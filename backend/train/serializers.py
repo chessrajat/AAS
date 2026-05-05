@@ -3,6 +3,8 @@ from rest_framework import serializers
 from .models import (
     TrainingArtifact,
     TrainingConfig,
+    TrainingDataset,
+    TrainingDatasetAsset,
     TrainingDatasetClass,
     TrainingDatasetItem,
     TrainingEpochMetric,
@@ -16,6 +18,64 @@ class TrainingDatasetClassSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingDatasetClass
         fields = ('id', 'name', 'index')
+
+
+class TrainingDatasetAssetSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+    label_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TrainingDatasetAsset
+        fields = (
+            'id',
+            'dataset',
+            'image',
+            'image_url',
+            'label',
+            'label_url',
+            'original_image_name',
+            'original_label_name',
+            'width',
+            'height',
+            'validation_errors',
+            'created_at',
+        )
+        read_only_fields = fields
+
+    def get_image_url(self, obj):
+        request = self.context.get('request')
+        if not obj.image:
+            return None
+        return request.build_absolute_uri(obj.image.url) if request else obj.image.url
+
+    def get_label_url(self, obj):
+        request = self.context.get('request')
+        if not obj.label:
+            return None
+        return request.build_absolute_uri(obj.label.url) if request else obj.label.url
+
+
+class TrainingDatasetSerializer(serializers.ModelSerializer):
+    asset_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = TrainingDataset
+        fields = (
+            'id',
+            'name',
+            'description',
+            'asset_count',
+            'created_at',
+            'updated_at',
+        )
+        read_only_fields = ('created_at', 'updated_at')
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        return TrainingDataset.objects.create(
+            created_by=request.user if request and request.user.is_authenticated else None,
+            **validated_data,
+        )
 
 
 class TrainingSplitConfigSerializer(serializers.ModelSerializer):
