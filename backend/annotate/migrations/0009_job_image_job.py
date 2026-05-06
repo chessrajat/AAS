@@ -5,6 +5,25 @@ import django.db.models.deletion
 import annotate.models
 
 
+def assign_existing_images_to_default_jobs(apps, schema_editor):
+    Project = apps.get_model('annotate', 'Project')
+    Job = apps.get_model('annotate', 'Job')
+    Image = apps.get_model('annotate', 'Image')
+
+    for project in Project.objects.filter(images__job__isnull=True).distinct():
+        job, _ = Job.objects.get_or_create(
+            project=project,
+            name='Imported images',
+            defaults={'description': 'Images migrated from the project-level annotation workflow.'},
+        )
+        Image.objects.filter(project=project, job__isnull=True).update(job=job)
+
+
+def unassign_default_jobs(apps, schema_editor):
+    Image = apps.get_model('annotate', 'Image')
+    Image.objects.update(job=None)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -34,6 +53,7 @@ class Migration(migrations.Migration):
             name='job',
             field=models.ForeignKey(null=True, on_delete=django.db.models.deletion.CASCADE, related_name='images', to='annotate.job'),
         ),
+        migrations.RunPython(assign_existing_images_to_default_jobs, unassign_default_jobs),
         migrations.RemoveField(
             model_name='image',
             name='project',
