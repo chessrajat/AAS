@@ -61,11 +61,12 @@ def build_yolo_export(project, images, filename_prefix):
         archive.writestr('data.yaml', data_yaml)
 
         for image in images:
-            if image.file and os.path.exists(image.file.path):
-                archive.write(
-                    image.file.path,
-                    arcname=os.path.join('images', os.path.basename(image.file.name)),
-                )
+            if image.file:
+                with image.file.open('rb') as image_file:
+                    archive.writestr(
+                        os.path.join('images', os.path.basename(image.file.name)),
+                        image_file.read(),
+                    )
 
             annotations = image.annotations.select_related('project_class').all()
             label_lines = []
