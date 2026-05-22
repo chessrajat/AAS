@@ -47,7 +47,7 @@ def get_auto_annotate_config(project, model_id=None):
     return config
 
 
-def run_auto_annotation(job, config):
+def run_auto_annotation(job, config, progress_callback=None):
     if not config.model.file:
         raise AutoAnnotateError("Model file is missing.")
 
@@ -69,9 +69,9 @@ def run_auto_annotation(job, config):
             raise AutoAnnotateError("Model file is missing.")
 
         yolo = YOLO(str(model_path))
-        total_images = 0
+        processed_images = 0
         total_annotations = 0
-
+        total_images = len(images)
         for image in images:
             if not image.file:
                 continue
@@ -83,6 +83,9 @@ def run_auto_annotation(job, config):
 
             results = yolo.predict(source=str(image_path), verbose=False)
             if not results:
+                processed_images += 1
+                if progress_callback:
+                    progress_callback(processed_images, total_images, total_annotations)
                 continue
 
             result = results[0]
@@ -93,7 +96,9 @@ def run_auto_annotation(job, config):
                 image.save(update_fields=['status'])
 
             if boxes is None or boxes.cls is None or boxes.xyxy is None:
-                total_images += 1
+                processed_images += 1
+                if progress_callback:
+                    progress_callback(processed_images, total_images, total_annotations)
                 continue
 
             new_annotations = []
@@ -125,9 +130,11 @@ def run_auto_annotation(job, config):
             if new_annotations:
                 Annotation.objects.bulk_create(new_annotations)
                 total_annotations += len(new_annotations)
-            total_images += 1
+            processed_images += 1
+            if progress_callback:
+                progress_callback(processed_images, total_images, total_annotations)
 
         return {
-            "images_processed": total_images,
+            "images_processed": processed_images,
             "annotations_created": total_annotations,
         }

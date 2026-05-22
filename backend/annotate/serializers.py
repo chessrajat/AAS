@@ -12,6 +12,7 @@ from .models import (
     Annotation,
     AutoAnnotateClassMapping,
     AutoAnnotateConfig,
+    AutoAnnotateJob,
     Image,
     Job,
     Project,
@@ -351,6 +352,28 @@ class AutoAnnotateConfigSerializer(serializers.ModelSerializer):
                 AutoAnnotateClassMapping.objects.create(config=instance, **mapping)
 
         return instance
+
+
+class AutoAnnotateJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AutoAnnotateJob
+        fields = (
+            'id',
+            'job',
+            'config',
+            'status',
+            'queued_at',
+            'started_at',
+            'finished_at',
+            'total_images',
+            'processed_images',
+            'annotations_created',
+            'progress_percent',
+            'worker_id',
+            'locked_at',
+            'error_message',
+        )
+        read_only_fields = fields
 
 
 class ImageSerializer(serializers.ModelSerializer):

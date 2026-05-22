@@ -52,6 +52,62 @@ class TrainingRunnerStorageTests(TestCase):
 
 
 class TrainingWorkerCommandTests(SimpleTestCase):
+    def test_worker_runs_auto_annotate_before_training(self):
+        command = Command()
+        options = {
+            'limit': 1,
+            'job_id': None,
+            'worker_id': 'worker-1',
+            'loop': False,
+            'poll_interval': 0,
+        }
+
+        with (
+            mock.patch(
+                'train.management.commands.run_training_jobs.run_next_auto_annotate_job',
+                return_value=True,
+            ) as run_auto,
+            mock.patch(
+                'train.management.commands.run_training_jobs.claim_next_training_job',
+            ) as claim_training,
+            mock.patch(
+                'train.management.commands.run_training_jobs.TrainingJob.objects.filter',
+            ) as training_filter,
+        ):
+            training_filter.return_value.count.return_value = 0
+
+            command.handle(**options)
+
+        run_auto.assert_called_once_with(worker_id='worker-1')
+        claim_training.assert_not_called()
+
+    def test_worker_continues_when_auto_annotate_job_fails(self):
+        command = Command()
+        options = {
+            'limit': 1,
+            'job_id': None,
+            'worker_id': 'worker-1',
+            'loop': False,
+            'poll_interval': 0,
+        }
+
+        with (
+            mock.patch(
+                'train.management.commands.run_training_jobs.run_next_auto_annotate_job',
+                side_effect=Exception('auto failed'),
+            ),
+            mock.patch(
+                'train.management.commands.run_training_jobs.claim_next_training_job',
+                return_value=None,
+            ),
+            mock.patch(
+                'train.management.commands.run_training_jobs.TrainingJob.objects.filter',
+            ) as training_filter,
+        ):
+            training_filter.return_value.count.return_value = 0
+
+            command.handle(**options)
+
     def test_loop_mode_keeps_polling_until_interrupted(self):
         command = Command()
         options = {
@@ -63,6 +119,10 @@ class TrainingWorkerCommandTests(SimpleTestCase):
         }
 
         with (
+            mock.patch(
+                'train.management.commands.run_training_jobs.run_next_auto_annotate_job',
+                return_value=False,
+            ),
             mock.patch('train.management.commands.run_training_jobs.claim_next_training_job') as claim,
             mock.patch('train.management.commands.run_training_jobs.run_training_job'),
             mock.patch('train.management.commands.run_training_jobs.TrainingJob.objects.filter') as training_filter,

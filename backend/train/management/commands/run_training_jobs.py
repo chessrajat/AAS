@@ -3,12 +3,13 @@ from django.core.management.base import BaseCommand, CommandError
 import socket
 import time
 
+from annotate.runner import run_next_auto_annotate_job
 from train.models import TrainingJob
 from train.runner import claim_next_training_job, run_training_job
 
 
 class Command(BaseCommand):
-    help = 'Run pending YOLO training jobs from the training queue.'
+    help = 'Run pending auto-annotate and YOLO training jobs from the queue.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -73,10 +74,22 @@ class Command(BaseCommand):
     def _run_batch(self, limit, worker_id, job_id):
         ran_count = 0
         for _ in range(limit):
+            try:
+                ran_auto_annotate_job = run_next_auto_annotate_job(worker_id=worker_id)
+            except Exception as exc:
+                self.stderr.write(self.style.ERROR(f'Auto-annotate job failed: {exc}'))
+                ran_count += 1
+                continue
+
+            if ran_auto_annotate_job:
+                self.stdout.write(self.style.SUCCESS('Auto-annotate job completed.'))
+                ran_count += 1
+                continue
+
             job = claim_next_training_job(worker_id=worker_id, job_id=job_id)
             if not job:
                 if ran_count == 0:
-                    self.stdout.write(self.style.WARNING('No pending training jobs found.'))
+                    self.stdout.write(self.style.WARNING('No pending ML jobs found.'))
                 break
 
             self.stdout.write(f'Running training job #{job.id}...')

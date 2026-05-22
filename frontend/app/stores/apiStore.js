@@ -1031,4 +1031,20 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  fetchAutoAnnotateJob: async (jobId, autoAnnotateJobId) => {
+    set({ error: null });
+    if (!jobId || !autoAnnotateJobId) {
+      return { ok: false, error: "Missing auto-annotate job id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/jobs/${jobId}/auto-annotate/jobs/${autoAnnotateJobId}/`,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load auto-annotate status");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
 }));

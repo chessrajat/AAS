@@ -66,6 +66,7 @@ export default function ProjectAnnotatePage() {
     createAutoAnnotateConfig,
     updateAutoAnnotateConfig,
     runJobAutoAnnotate,
+    fetchAutoAnnotateJob,
     markImageDone,
   } = useApiStore();
   const fileInputRef = useRef(null);
@@ -109,6 +110,8 @@ export default function ProjectAnnotatePage() {
   const [autoAnnotateConfigs, setAutoAnnotateConfigs] = useState([]);
   const [isSavingAutoAnnotate, setIsSavingAutoAnnotate] = useState(false);
   const [isAutoAnnotating, setIsAutoAnnotating] = useState(false);
+  const [activeAutoAnnotateJobId, setActiveAutoAnnotateJobId] = useState(null);
+  const [autoAnnotateJobStatus, setAutoAnnotateJobStatus] = useState(null);
   const [isMarkingImageDone, setIsMarkingImageDone] = useState(false);
   const [isSavingLabel, setIsSavingLabel] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
@@ -134,6 +137,13 @@ export default function ProjectAnnotatePage() {
   const hasImages = images.length > 0;
   const activeJob = jobs.find((job) => String(job.id) === String(activeJobId));
   const activeImage = hasImages ? images[activeIndex] : null;
+  const autoAnnotateStatus = autoAnnotateJobStatus?.status || "";
+  const autoAnnotateProgress = Math.round(autoAnnotateJobStatus?.progress_percent || 0);
+  const autoAnnotateButtonLabel = isAutoAnnotating
+    ? autoAnnotateStatus === "running"
+      ? `Auto annotate ${autoAnnotateProgress}%`
+      : "Auto annotate queued"
+    : "Auto annotate";
   const imageName = activeImage?.file?.split("/").pop() || "No image";
   const projectLabels = project?.classes ?? [];
   const hasLabels = projectLabels.length > 0;
@@ -237,6 +247,9 @@ export default function ProjectAnnotatePage() {
     setActiveJobId("");
     setJobs([]);
     setImages([]);
+    setIsAutoAnnotating(false);
+    setActiveAutoAnnotateJobId(null);
+    setAutoAnnotateJobStatus(null);
   }, [params?.projectId]);
 
   useEffect(() => {
@@ -364,28 +377,76 @@ export default function ProjectAnnotatePage() {
       return;
     }
     setIsAutoAnnotating(true);
+    setAutoAnnotateJobStatus(null);
     const result = await runJobAutoAnnotate(activeJobId);
-    setIsAutoAnnotating(false);
     if (!result.ok) {
+      setIsAutoAnnotating(false);
       toast.error("Auto-annotate failed", {
         description: result.error || "Please try again.",
       });
       return;
     }
-    toast.success("Auto-annotate complete", {
-      description: `${result.data?.annotations_created || 0} annotations created.`,
+    setActiveAutoAnnotateJobId(result.data?.id || null);
+    setAutoAnnotateJobStatus(result.data || null);
+    toast.success("Auto-annotate queued", {
+      description: "The worker will process this job shortly.",
     });
-    if (activeImage?.id) {
-      const annotationsResult = await fetchAnnotations(activeImage.id);
-      if (annotationsResult.ok) {
-        setAnnotations(annotationsResult.data || []);
-      }
-    }
-    const imagesResult = await fetchJobImages(activeJobId);
-    if (imagesResult.ok) {
-      setImages(imagesResult.data || []);
-    }
   };
+
+  useEffect(() => {
+    if (!isAutoAnnotating || !activeJobId || !activeAutoAnnotateJobId) {
+      return;
+    }
+
+    let isMounted = true;
+    const pollStatus = async () => {
+      const result = await fetchAutoAnnotateJob(activeJobId, activeAutoAnnotateJobId);
+      if (!isMounted || !result.ok) {
+        return;
+      }
+      const statusData = result.data;
+      setAutoAnnotateJobStatus(statusData);
+      if (statusData?.status === "completed") {
+        setIsAutoAnnotating(false);
+        toast.success("Auto-annotate complete", {
+          description: `${statusData.annotations_created || 0} annotations created.`,
+        });
+        if (activeImage?.id) {
+          const annotationsResult = await fetchAnnotations(activeImage.id);
+          if (isMounted && annotationsResult.ok) {
+            setAnnotations(annotationsResult.data || []);
+          }
+        }
+        const imagesResult = await fetchJobImages(activeJobId);
+        if (isMounted && imagesResult.ok) {
+          setImages(imagesResult.data || []);
+        }
+      } else if (statusData?.status === "failed") {
+        setIsAutoAnnotating(false);
+        toast.error("Auto-annotate failed", {
+          description: statusData.error_message || "Please try again.",
+        });
+      } else if (statusData?.status === "cancelled") {
+        setIsAutoAnnotating(false);
+        toast.error("Auto-annotate cancelled");
+      }
+    };
+
+    pollStatus();
+    const intervalId = window.setInterval(pollStatus, 2000);
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    activeAutoAnnotateJobId,
+    activeImage?.id,
+    activeJobId,
+    fetchAnnotations,
+    fetchAutoAnnotateJob,
+    fetchJobImages,
+    isAutoAnnotating,
+  ]);
 
   useEffect(() => {
     if (!activeImage?.id) {
@@ -1570,9 +1631,13 @@ export default function ProjectAnnotatePage() {
           {isAutoAnnotating ? (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#201d1d]/40">
               <div className="rounded-sm border border-border bg-background px-6 py-5 text-center">
-                <p className="text-sm font-semibold text-slate-900">Auto-annotating</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {autoAnnotateStatus === "running" ? "Auto-annotating" : "Auto-annotate queued"}
+                </p>
                 <p className="mt-2 text-xs text-slate-500">
-                  Running model on job images...
+                  {autoAnnotateStatus === "running"
+                    ? `${autoAnnotateJobStatus?.processed_images || 0}/${autoAnnotateJobStatus?.total_images || 0} images processed (${autoAnnotateProgress}%)`
+                    : "Waiting for the worker..."}
                 </p>
               </div>
             </div>
@@ -1622,7 +1687,7 @@ export default function ProjectAnnotatePage() {
               disabled={!activeJobId || !hasAutoAnnotateConfig || isAutoAnnotating}
               onClick={handleRunAutoAnnotate}
             >
-              Auto annotate
+              {autoAnnotateButtonLabel}
             </Button>
             <Button variant="outline" onClick={handleExportJob} disabled={isExporting || !activeJobId}>
               {isExporting ? "Exporting..." : "Export job"}

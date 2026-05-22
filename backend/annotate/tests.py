@@ -4,12 +4,15 @@ from unittest import mock
 
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage
+from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase, override_settings
+from rest_framework.test import APIClient
 
 from .annotate import run_auto_annotation
 from .models import (
     AIModel,
     Annotation,
+    AutoAnnotateJob,
     AutoAnnotateClassMapping,
     AutoAnnotateConfig,
     Image,
@@ -19,6 +22,8 @@ from .models import (
 )
 from .serializers import ImageSerializer
 from .views import build_yolo_export
+
+User = get_user_model()
 
 
 class NoPathMemoryStorage(Storage):
@@ -138,6 +143,48 @@ class AutoAnnotateStorageTests(TestCase):
         self.assertTrue(Annotation.objects.filter(image=image, project_class=project_class).exists())
 
     @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS)
+    def test_auto_annotate_reports_progress_after_each_processed_image(self):
+        NoPathMemoryStorage.files = {
+            'models/model.pt': b'model',
+            'projects/1/jobs/1/images/image.jpg': b'image',
+        }
+        project = Project.objects.create(name='Project')
+        job = Job.objects.create(project=project, name='Job')
+        project_class = ProjectClass.objects.create(project=project, name='Item', index=0)
+        Image.objects.create(
+            job=job,
+            file='projects/1/jobs/1/images/image.jpg',
+            width=100,
+            height=100,
+        )
+        ai_model = AIModel.objects.create(
+            name='Model',
+            file='models/model.pt',
+            classes=['Item'],
+        )
+        config = AutoAnnotateConfig.objects.create(project=project, model=ai_model)
+        AutoAnnotateClassMapping.objects.create(
+            config=config,
+            model_class=0,
+            project_class=project_class,
+        )
+        fake_result = mock.Mock(boxes=None)
+        fake_model = mock.Mock()
+        fake_model.predict.return_value = [fake_result]
+        progress_events = []
+
+        with mock.patch('annotate.annotate.YOLO', return_value=fake_model):
+            run_auto_annotation(
+                job,
+                config,
+                progress_callback=lambda processed, total, annotations: progress_events.append(
+                    (processed, total, annotations)
+                ),
+            )
+
+        self.assertEqual(progress_events, [(1, 1, 0)])
+
+    @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS)
     def test_yolo_export_reads_images_from_storage_without_local_paths(self):
         NoPathMemoryStorage.files = {
             'projects/1/jobs/1/images/image.jpg': b'image-content',
@@ -168,3 +215,69 @@ class AutoAnnotateStorageTests(TestCase):
             b'image-content',
         )
         self.assertIn('labels/image.txt', archive.namelist())
+
+
+class AutoAnnotateQueueTests(TestCase):
+    def test_auto_annotate_run_enqueues_job_without_running_inline(self):
+        user = User.objects.create_superuser(
+            username='queue-admin',
+            email='admin@example.com',
+            password='password',
+        )
+        project = Project.objects.create(name='Project')
+        job = Job.objects.create(project=project, name='Job')
+        ai_model = AIModel.objects.create(
+            name='Model',
+            file='models/model.pt',
+            classes=['Item'],
+        )
+        AutoAnnotateConfig.objects.create(project=project, model=ai_model)
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        response = client.post(f'/api/annotate/jobs/{job.id}/auto-annotate/run/', {})
+
+        self.assertEqual(response.status_code, 202)
+        queued_job = AutoAnnotateJob.objects.get()
+        self.assertEqual(queued_job.job, job)
+        self.assertEqual(queued_job.config.model, ai_model)
+        self.assertEqual(queued_job.status, AutoAnnotateJob.STATUS_PENDING)
+        self.assertEqual(response.data['id'], queued_job.id)
+
+    def test_auto_annotate_job_status_endpoint_returns_progress(self):
+        user = User.objects.create_superuser(
+            username='status-admin',
+            email='status-admin@example.com',
+            password='password',
+        )
+        project = Project.objects.create(name='Project')
+        job = Job.objects.create(project=project, name='Job')
+        ai_model = AIModel.objects.create(
+            name='Model',
+            file='models/model.pt',
+            classes=['Item'],
+        )
+        config = AutoAnnotateConfig.objects.create(project=project, model=ai_model)
+        auto_job = AutoAnnotateJob.objects.create(
+            job=job,
+            config=config,
+            status=AutoAnnotateJob.STATUS_RUNNING,
+            total_images=10,
+            processed_images=4,
+            annotations_created=7,
+            progress_percent=40,
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        response = client.get(
+            f'/api/annotate/jobs/{job.id}/auto-annotate/jobs/{auto_job.id}/',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['id'], auto_job.id)
+        self.assertEqual(response.data['status'], AutoAnnotateJob.STATUS_RUNNING)
+        self.assertEqual(response.data['processed_images'], 4)
+        self.assertEqual(response.data['total_images'], 10)
+        self.assertEqual(response.data['annotations_created'], 7)
+        self.assertEqual(response.data['progress_percent'], 40)

@@ -14,10 +14,11 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, OuterRef, Subquery
 from django.http import HttpResponse
 
-from .annotate import AutoAnnotateError, get_auto_annotate_config, run_auto_annotation
+from .annotate import AutoAnnotateError, get_auto_annotate_config
 from .models import (
     AIModel,
     Annotation,
+    AutoAnnotateJob,
     Image,
     Job,
     Project,
@@ -28,6 +29,7 @@ from .serializers import (
     AIModelSerializer,
     AnnotationSerializer,
     AutoAnnotateConfigSerializer,
+    AutoAnnotateJobSerializer,
     ImageSerializer,
     JobSerializer,
     ProjectClassSerializer,
@@ -330,6 +332,7 @@ class JobViewSet(viewsets.ModelViewSet):
         'images:POST': {'owner', 'manager'},
         'export_job': {'owner', 'manager'},
         'auto_annotate_run': {'owner', 'manager'},
+        'auto_annotate_job_status': ALL_PROJECT_ROLES,
     }
 
     def get_queryset(self):
@@ -415,13 +418,39 @@ class JobViewSet(viewsets.ModelViewSet):
                 )
         try:
             config = get_auto_annotate_config(job.project, model_id=model_id)
-            result = run_auto_annotation(job, config)
         except AutoAnnotateError as exc:
             return Response(
                 {'detail': str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(result, status=status.HTTP_200_OK)
+        auto_annotate_job = AutoAnnotateJob.objects.create(
+            job=job,
+            config=config,
+            total_images=job.images.count(),
+        )
+        return Response(
+            AutoAnnotateJobSerializer(auto_annotate_job).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path=r'auto-annotate/jobs/(?P<auto_annotate_job_id>[^/.]+)',
+    )
+    def auto_annotate_job_status(self, request, pk=None, auto_annotate_job_id=None):
+        job = self.get_object()
+        auto_annotate_job = (
+            job.auto_annotate_jobs.select_related('config', 'config__model')
+            .filter(id=auto_annotate_job_id)
+            .first()
+        )
+        if not auto_annotate_job:
+            return Response(
+                {'detail': 'Auto-annotate job not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(AutoAnnotateJobSerializer(auto_annotate_job).data)
 
 
 class ImageViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
