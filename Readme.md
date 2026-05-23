@@ -53,6 +53,11 @@ Run the full stack with the default CPU-compatible worker:
 docker compose up --build
 ```
 
+The Docker stack is served through nginx:
+- App: `http://localhost/`
+- LAN access: `http://<server-ip>/`
+- MinIO console: `http://localhost:9001/`
+
 On a machine with NVIDIA Container Toolkit configured, run the worker with GPU access:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build

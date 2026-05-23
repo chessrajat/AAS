@@ -156,6 +156,7 @@ if os.getenv('USE_S3_STORAGE', 'False').lower() in {'1', 'true', 'yes', 'on'}:
     AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'us-east-1')
     AWS_S3_ADDRESSING_STYLE = os.getenv('AWS_S3_ADDRESSING_STYLE', 'path')
     AWS_S3_SIGNATURE_VERSION = os.getenv('AWS_S3_SIGNATURE_VERSION', 's3v4')
+    AWS_S3_PROXY_URLS = os.getenv('AWS_S3_PROXY_URLS', 'False').lower() in {'1', 'true', 'yes', 'on'}
     AWS_QUERYSTRING_AUTH = os.getenv('AWS_QUERYSTRING_AUTH', 'False').lower() in {'1', 'true', 'yes', 'on'}
     AWS_DEFAULT_ACL = None
     AWS_S3_FILE_OVERWRITE = False

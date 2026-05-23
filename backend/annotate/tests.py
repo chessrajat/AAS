@@ -63,13 +63,11 @@ class ImageSerializerStorageTests(TestCase):
         AWS_SECRET_ACCESS_KEY='aasminio123',
         AWS_STORAGE_BUCKET_NAME='aas-media',
         AWS_S3_ENDPOINT_URL='http://minio:9000',
-        AWS_S3_PUBLIC_ENDPOINT_URL='http://localhost:9000',
+        AWS_S3_PROXY_URLS='True',
         AWS_S3_REGION_NAME='us-east-1',
         AWS_S3_ADDRESSING_STYLE='path',
         AWS_QUERYSTRING_AUTH=False,
-        AWS_S3_CUSTOM_DOMAIN='localhost:9000/aas-media',
-        AWS_S3_URL_PROTOCOL='http:',
-        MEDIA_URL='http://localhost:9000/aas-media/media/',
+        MEDIA_URL='/media/',
         STORAGES={
             'default': {
                 'BACKEND': 'aas.storage.MinioMediaStorage',
@@ -79,7 +77,7 @@ class ImageSerializerStorageTests(TestCase):
             },
         },
     )
-    def test_file_url_uses_storage_url_without_rewriting_to_backend_media(self):
+    def test_file_url_uses_proxy_media_url_with_request_host(self):
         project = Project.objects.create(name='Project')
         job = Job.objects.create(project=project, name='Job')
         image = Image.objects.create(
@@ -94,7 +92,7 @@ class ImageSerializerStorageTests(TestCase):
 
         self.assertEqual(
             data['file_url'],
-            'http://localhost:9000/aas-media/media/projects/1/jobs/1/images/example.jpg',
+            'http://testserver/media/projects/1/jobs/1/images/example.jpg',
         )
 
 
