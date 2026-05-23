@@ -47,6 +47,19 @@ App runs at:
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 
+### Docker
+Run the full stack with the default CPU-compatible worker:
+```bash
+docker compose up --build
+```
+
+On a machine with NVIDIA Container Toolkit configured, run the worker with GPU access:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+The GPU override sets `YOLO_DEVICE=0` for the training worker. Without the override, Ultralytics uses its default device detection and falls back to CPU.
+
 ## 🔐 Auth
 This project uses JWT auth endpoints:
 - `POST /api/auth/token/`

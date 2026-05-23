@@ -6,7 +6,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 
 from .management.commands.run_training_jobs import Command
 from .models import TrainingArtifact, TrainingConfig, TrainingJob, TrainingPipeline
-from .runner import _copy_field_file, _store_artifact
+from .runner import _copy_field_file, _store_artifact, run_training_job
 
 
 class StorageFile:
@@ -49,6 +49,31 @@ class TrainingRunnerStorageTests(TestCase):
         with artifact.file.open('rb') as artifact_file:
             self.assertEqual(artifact_file.read(), b'artifact-content')
         source.unlink()
+
+    @override_settings(YOLO_DEVICE='0')
+    def test_run_training_job_passes_configured_yolo_device(self):
+        pipeline = TrainingPipeline.objects.create(name='pipe')
+        config = TrainingConfig.objects.create(
+            pipeline=pipeline,
+            name='config',
+            args={'epochs': 1},
+        )
+        job = TrainingJob.objects.create(pipeline=pipeline, config=config)
+        fake_model = mock.Mock()
+        fake_model.train.return_value = mock.Mock(save_dir=None)
+        fake_model.trainer = mock.Mock(save_dir=None)
+
+        with (
+            mock.patch(
+                'train.runner.materialize_yolo_dataset',
+                return_value=(Path('/tmp/aas-dataset'), Path('/tmp/aas-dataset/data.yaml')),
+            ),
+            mock.patch('train.runner._resolve_base_model', return_value='yolo11n.pt'),
+            mock.patch('train.runner.YOLO', return_value=fake_model),
+        ):
+            run_training_job(job)
+
+        self.assertEqual(fake_model.train.call_args.kwargs['device'], '0')
 
 
 class TrainingWorkerCommandTests(SimpleTestCase):

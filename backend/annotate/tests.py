@@ -99,7 +99,7 @@ class ImageSerializerStorageTests(TestCase):
 
 
 class AutoAnnotateStorageTests(TestCase):
-    @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS)
+    @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS, YOLO_DEVICE='0')
     def test_auto_annotate_reads_model_and_images_from_storage_without_local_paths(self):
         NoPathMemoryStorage.files = {
             'models/model.pt': b'model',
@@ -140,6 +140,7 @@ class AutoAnnotateStorageTests(TestCase):
         yolo.assert_called_once()
         self.assertNotEqual(yolo.call_args.args[0], 'models/model.pt')
         self.assertNotEqual(fake_model.predict.call_args.kwargs['source'], image.file.name)
+        self.assertEqual(fake_model.predict.call_args.kwargs['device'], '0')
         self.assertTrue(Annotation.objects.filter(image=image, project_class=project_class).exists())
 
     @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS)

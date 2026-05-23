@@ -275,6 +275,8 @@ def run_training_job(job):
         config_args = dict(job.config.args or {})
         total_epochs = int(config_args.get('epochs') or job.total_epochs or 100)
         config_args['epochs'] = total_epochs
+        if settings.YOLO_DEVICE:
+            config_args.setdefault('device', settings.YOLO_DEVICE)
         final_args = {
             'data': str(data_yaml_path),
             'project': str(work_dir / 'runs'),

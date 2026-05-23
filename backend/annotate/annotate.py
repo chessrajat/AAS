@@ -2,6 +2,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from django.conf import settings
 from ultralytics import YOLO
 
 from .models import Annotation, AutoAnnotateConfig, Image
@@ -81,7 +82,13 @@ def run_auto_annotation(job, config, progress_callback=None):
             except FileNotFoundError:
                 continue
 
-            results = yolo.predict(source=str(image_path), verbose=False)
+            predict_args = {
+                'source': str(image_path),
+                'verbose': False,
+            }
+            if settings.YOLO_DEVICE:
+                predict_args['device'] = settings.YOLO_DEVICE
+            results = yolo.predict(**predict_args)
             if not results:
                 processed_images += 1
                 if progress_callback:

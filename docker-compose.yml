@@ -105,6 +105,7 @@ services:
   training-worker:
     build:
       context: ./backend
+      dockerfile: Dockerfile.worker
     restart: unless-stopped
     depends_on:
       migrate:
