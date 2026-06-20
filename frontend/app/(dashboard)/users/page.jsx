@@ -229,14 +229,14 @@ export default function UsersPage() {
     <SidebarProvider>
       <HomeSidebar />
       <SidebarInset>
-        <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/80 px-6 py-4 backdrop-blur">
+        <header className="aas-header">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              <p className="aas-kicker">
                 Administration
               </p>
-              <h1 className="text-xl font-semibold text-slate-900">User Management</h1>
+              <h1 className="aas-page-title">User Management</h1>
             </div>
           </div>
           <Dialog
@@ -323,7 +323,7 @@ export default function UsersPage() {
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  <label className="flex items-center gap-2 rounded-sm border border-border bg-muted px-3 py-2 text-sm text-foreground">
                     <input
                       type="checkbox"
                       checked={userForm.is_active}
@@ -333,7 +333,7 @@ export default function UsersPage() {
                     />
                     Active account
                   </label>
-                  <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  <label className="flex items-center gap-2 rounded-sm border border-border bg-muted px-3 py-2 text-sm text-foreground">
                     <input
                       type="checkbox"
                       checked={userForm.is_staff}
@@ -368,8 +368,8 @@ export default function UsersPage() {
           </Dialog>
         </header>
 
-        <div className="flex-1 space-y-6 bg-slate-50 px-6 py-6">
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="aas-content">
+          <div className="flex flex-col gap-3 rounded-sm border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
               <ShieldUser className="size-4 text-slate-500" />
               {users.length} total users
@@ -395,7 +395,7 @@ export default function UsersPage() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {filteredUsers.map((user) => (
-                <Card key={user.id} className="border-slate-200/70 bg-white p-5 shadow-sm">
+                <Card key={user.id} className="border-border bg-card p-5">
                   <div className="space-y-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>

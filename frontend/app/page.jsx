@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,13 +31,30 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+const formatCount = (count, singular, plural = `${singular}s`) => {
+  const value = Number(count) || 0;
+  return `${value} ${value === 1 ? singular : plural}`;
+};
+
+const getUserInitials = (user) => {
+  const name = `${user?.first_name || ""} ${user?.last_name || ""}`.trim();
+  const source = name || user?.username || "U";
+  return source
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+};
+
 export default function Home() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const {
     createProject,
     deleteProject,
     updateProject,
+    updateProjectUsers,
     fetchProjects,
+    fetchProjectAssignableUsers,
     isCreatingProject,
     isLoadingProjects,
     projects,
@@ -51,6 +69,9 @@ export default function Home() {
   const [projectToDelete, setProjectToDelete] = useState(null);
   const [projectToEdit, setProjectToEdit] = useState(null);
   const [editProjectName, setEditProjectName] = useState("");
+  const [editProjectUserIds, setEditProjectUserIds] = useState([]);
+  const [assignableProjectUsers, setAssignableProjectUsers] = useState([]);
+  const [isLoadingAssignableUsers, setIsLoadingAssignableUsers] = useState(false);
   const [isUpdatingProject, setIsUpdatingProject] = useState(false);
 
   const resetProjectForm = () => {
@@ -125,6 +146,35 @@ export default function Home() {
   const handleOpenEditProject = (project) => {
     setProjectToEdit(project);
     setEditProjectName(project.name || "");
+    setEditProjectUserIds((project.members || []).map((member) => member.id));
+    setAssignableProjectUsers(project.members || []);
+    setIsLoadingAssignableUsers(true);
+    fetchProjectAssignableUsers(project.id).then((result) => {
+      if (result.ok) {
+        setAssignableProjectUsers(result.data || []);
+      } else {
+        toast.error("Unable to load assignable users", {
+          description: result.error || "Please try again.",
+        });
+      }
+      setIsLoadingAssignableUsers(false);
+    });
+  };
+
+  const handleToggleEditProjectUser = (userId, checked) => {
+    setEditProjectUserIds((prev) => {
+      if (checked) {
+        return prev.includes(userId) ? prev : [...prev, userId];
+      }
+      return prev.filter((item) => item !== userId);
+    });
+  };
+
+  const closeEditProjectDialog = () => {
+    setProjectToEdit(null);
+    setEditProjectName("");
+    setEditProjectUserIds([]);
+    setAssignableProjectUsers([]);
   };
 
   const handleConfirmEditProject = async (event) => {
@@ -139,22 +189,53 @@ export default function Home() {
       return;
     }
 
+    const nextUserIds = editProjectUserIds;
+    if (nextUserIds.length === 0) {
+      toast.error("Assign at least one user to the project.");
+      return;
+    }
+
     setIsUpdatingProject(true);
     const result = await updateProject(projectToEdit.id, { name: nextName });
-    setIsUpdatingProject(false);
-
     if (!result.ok) {
+      setIsUpdatingProject(false);
       toast.error("Project update failed", {
         description: result.error || "Please try again.",
       });
       return;
     }
 
-    toast.success("Project renamed", {
+    const currentUserIds = (projectToEdit.members || [])
+      .map((member) => member.id)
+      .sort((a, b) => a - b);
+    const sortedNextUserIds = [...nextUserIds].sort((a, b) => a - b);
+    const usersChanged =
+      currentUserIds.length !== sortedNextUserIds.length ||
+      currentUserIds.some((userId, index) => userId !== sortedNextUserIds[index]);
+
+    if (usersChanged) {
+      const usersResult = await updateProjectUsers(projectToEdit.id, sortedNextUserIds);
+      if (!usersResult.ok) {
+        setIsUpdatingProject(false);
+        toast.error("Project users update failed", {
+          description: usersResult.error || "Please try again.",
+        });
+        return;
+      }
+      useApiStore.setState((state) => ({
+        projects: state.projects.map((project) =>
+          project.id === projectToEdit.id
+            ? { ...project, ...result.data, members: usersResult.data || [] }
+            : project,
+        ),
+      }));
+    }
+
+    setIsUpdatingProject(false);
+    toast.success("Project updated", {
       description: nextName,
     });
-    setProjectToEdit(null);
-    setEditProjectName("");
+    closeEditProjectDialog();
   };
 
   const handleOpenDeleteProject = (project) => {
@@ -184,14 +265,14 @@ export default function Home() {
     <SidebarProvider>
       <HomeSidebar />
       <SidebarInset>
-        <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/80 px-6 py-4 backdrop-blur">
+        <header className="aas-header">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              <p className="aas-kicker">
                 Dashboard
               </p>
-              <h1 className="text-xl font-semibold text-slate-900">Projects</h1>
+              <h1 className="aas-page-title">Projects</h1>
             </div>
           </div>
           <Dialog
@@ -204,7 +285,7 @@ export default function Home() {
             }}
           >
             <DialogTrigger asChild>
-              <Button variant="default">New Project</Button>
+              <Button variant="default" className="cursor-pointer">New Project</Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
@@ -313,7 +394,7 @@ export default function Home() {
             </DialogContent>
           </Dialog>
         </header>
-        <div className="flex-1 space-y-6 bg-slate-50 px-6 py-6">
+        <div className="aas-content">
           {isLoadingProjects ? (
             <Card className="border-dashed border-slate-200/70 bg-white p-10 text-center">
               <p className="text-sm text-slate-500">Loading projects...</p>
@@ -325,61 +406,105 @@ export default function Home() {
               </p>
             </Card>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {projects.map((project) => (
-                <div key={project.id} className="relative">
-                  <Link href={`/projects/${project.id}`} className="block">
-                    <Card className="border-slate-200/70 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
-                      <div className="space-y-2">
-                        <h2 className="text-lg font-semibold text-slate-900">
-                          {project.name}
-                        </h2>
-                        <p className="text-sm text-slate-500">
-                          {project.description || "No description"}
-                        </p>
-                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                          {project.classes?.length || 0} classes
-                        </p>
-                      </div>
-                    </Card>
-                  </Link>
-                  <div className="absolute right-3 top-3">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-slate-500 hover:text-slate-900"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleOpenEditProject(project);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                          Edit project
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleOpenDeleteProject(project);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete project
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {projects.map((project) => {
+                const projectImage = project.first_job_image_url;
+                const jobCount = project.job_count ?? project.jobs?.length ?? 0;
+                const classCount = project.classes?.length || 0;
+                const members = project.members || [];
+                const visibleMembers = members.slice(0, 3);
+                const remainingMembers = Math.max(members.length - visibleMembers.length, 0);
+
+                return (
+                  <div key={project.id} className="relative">
+                    <Link href={`/projects/${project.id}/jobs`} className="block">
+                      <Card className="overflow-hidden border-border bg-card p-0 transition hover:border-foreground">
+                        <div className="aspect-[16/9] border-b border-border bg-muted">
+                          {projectImage ? (
+                            <div
+                              aria-hidden="true"
+                              className="h-full w-full bg-cover bg-center"
+                              style={{ backgroundImage: `url("${projectImage}")` }}
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-secondary text-xs font-medium uppercase text-muted-foreground">
+                              [ no image ]
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-4 p-4">
+                          <div className="pr-9">
+                            <h2 className="min-h-12 text-lg font-bold leading-tight text-slate-900">
+                              {project.name}
+                            </h2>
+                            <p className="mt-2 min-h-10 text-sm leading-5 text-slate-500">
+                              {project.description || "No description"}
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 border-y border-border py-3 text-xs text-muted-foreground">
+                            <span>{formatCount(jobCount, "job")}</span>
+                            <span>{formatCount(classCount, "class", "classes")}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="flex -space-x-2">
+                              {visibleMembers.map((member) => (
+                                <span
+                                  key={member.id}
+                                  className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-muted text-[10px] font-medium text-foreground"
+                                  title={member.username}
+                                >
+                                  {getUserInitials(member)}
+                                </span>
+                              ))}
+                              {remainingMembers > 0 ? (
+                                <span className="flex h-7 w-7 items-center justify-center rounded-full border border-card bg-primary text-[10px] font-medium text-primary-foreground">
+                                  +{remainingMembers}
+                                </span>
+                              ) : null}
+                            </div>
+                            <span className="text-xs text-muted-foreground">open</span>
+                          </div>
+                        </div>
+                      </Card>
+                    </Link>
+                    <div className="absolute right-3 top-3">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 bg-card/90 text-slate-500 hover:text-slate-900"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenEditProject(project);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                            Edit project
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenDeleteProject(project);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete project
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -387,14 +512,13 @@ export default function Home() {
           open={Boolean(projectToEdit)}
           onOpenChange={(open) => {
             if (!open && !isUpdatingProject) {
-              setProjectToEdit(null);
-              setEditProjectName("");
+              closeEditProjectDialog();
             }
           }}
         >
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>Rename project</DialogTitle>
+              <DialogTitle>Edit project</DialogTitle>
             </DialogHeader>
             <form className="space-y-4" onSubmit={handleConfirmEditProject}>
               <div className="space-y-2">
@@ -407,15 +531,50 @@ export default function Home() {
                   autoFocus
                 />
               </div>
+              <div className="space-y-3">
+                <Label>Assigned users</Label>
+                <div className="max-h-64 overflow-y-auto border border-border">
+                  {isLoadingAssignableUsers ? (
+                    <p className="p-3 text-sm text-muted-foreground">Loading users...</p>
+                  ) : assignableProjectUsers.length === 0 ? (
+                    <p className="p-3 text-sm text-muted-foreground">No users available.</p>
+                  ) : (
+                    assignableProjectUsers.map((user) => {
+                      const isChecked = editProjectUserIds.includes(user.id);
+                      return (
+                        <label
+                          key={user.id}
+                          className="flex cursor-pointer items-center gap-3 border-b border-border p-3 last:border-b-0"
+                        >
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={(checked) =>
+                              handleToggleEditProjectUser(user.id, Boolean(checked))
+                            }
+                          />
+                          <span className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-foreground">
+                            {getUserInitials(user)}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-foreground">
+                              {user.username}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {user.email || user.role || "user"}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   disabled={isUpdatingProject}
-                  onClick={() => {
-                    setProjectToEdit(null);
-                    setEditProjectName("");
-                  }}
+                  onClick={closeEditProjectDialog}
                 >
                   Cancel
                 </Button>

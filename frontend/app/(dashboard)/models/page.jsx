@@ -118,14 +118,14 @@ export default function ModelsPage() {
     <SidebarProvider>
       <HomeSidebar />
       <SidebarInset>
-        <header className="flex items-center justify-between border-b border-slate-200/60 bg-white/80 px-6 py-4 backdrop-blur">
+        <header className="aas-header">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              <p className="aas-kicker">
                 Workspace
               </p>
-              <h1 className="text-xl font-semibold text-slate-900">Models</h1>
+              <h1 className="aas-page-title">Models</h1>
             </div>
           </div>
           <Dialog
@@ -196,7 +196,7 @@ export default function ModelsPage() {
             </DialogContent>
           </Dialog>
         </header>
-        <div className="flex-1 space-y-6 bg-slate-50 px-6 py-6">
+        <div className="aas-content">
           {isLoadingModels ? (
             <Card className="border-dashed border-slate-200/70 bg-white p-10 text-center">
               <p className="text-sm text-slate-500">Loading models...</p>
@@ -212,7 +212,7 @@ export default function ModelsPage() {
               {models.map((model) => (
                 <Card
                   key={model.id}
-                  className="border-slate-200/70 bg-white p-5 shadow-sm"
+                  className="border-border bg-card p-5"
                 >
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">

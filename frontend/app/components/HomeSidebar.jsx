@@ -1,15 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
 import {
   ChevronUp,
   Cpu,
+  Database,
   FolderKanban,
-  LayoutGrid,
   LogOut,
+  Moon,
+  Pickaxe,
   ShieldUser,
+  Sun,
   UserCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -46,10 +51,19 @@ export default function HomeSidebar() {
     (state) => state.resolveUserManagementAccess,
   );
   const logoutWithApi = useAuthStore((state) => state.logoutWithApi);
+  const { resolvedTheme, setTheme } = useTheme();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isThemeMounted, setIsThemeMounted] = useState(false);
   const isProjects = pathname === "/" || pathname.startsWith("/projects/");
   const isModels = pathname === "/models";
+  const isTraining = pathname === "/training";
+  const isTrainingDatasets = pathname === "/training-datasets";
   const isUsers = pathname === "/users";
+  const isDarkTheme = resolvedTheme === "dark";
+
+  useEffect(() => {
+    setIsThemeMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!accessToken || permissionsLoaded) {
@@ -69,16 +83,19 @@ export default function HomeSidebar() {
     router.replace("/login");
   };
 
+  const handleThemeToggle = () => {
+    setTheme(isDarkTheme ? "light" : "dark");
+  };
+
   return (
     <>
       <Sidebar collapsible="icon">
         <SidebarHeader className="gap-2 px-3 py-4">
-          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-            <LayoutGrid className="size-4 text-slate-900" />
-            AAS
+          <div className="flex items-center gap-2 text-sm font-bold uppercase text-foreground">
+            <Image src="/app-icon.svg" alt="" width={28} height={28} className="border border-border" />
+            <span className="group-data-[collapsible=icon]:hidden">AAS</span>
           </div>
         </SidebarHeader>
-        <SidebarSeparator />
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupLabel>Workspace</SidebarGroupLabel>
@@ -100,6 +117,22 @@ export default function HomeSidebar() {
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isTraining}>
+                    <Link href="/training">
+                      <Pickaxe />
+                      <span>Training</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isTrainingDatasets}>
+                    <Link href="/training-datasets">
+                      <Database />
+                      <span>Training Datasets</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
                 {canManageUsers ? (
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild isActive={isUsers}>
@@ -117,6 +150,18 @@ export default function HomeSidebar() {
         <SidebarSeparator />
         <SidebarFooter className="p-2">
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                type="button"
+                onClick={handleThemeToggle}
+                title={isDarkTheme ? "Switch to light theme" : "Switch to dark theme"}
+              >
+                {isThemeMounted && isDarkTheme ? <Sun /> : <Moon />}
+                <span>
+                  {isThemeMounted && isDarkTheme ? "Light theme" : "Dark theme"}
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

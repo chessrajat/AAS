@@ -1,14 +1,54 @@
 import uuid
 
+from django.conf import settings
 from django.db import models
 
 
 class Project(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        through='ProjectMembership',
+        through_fields=('project', 'user'),
+        blank=True,
+        related_name='annotation_projects',
+    )
 
     def __str__(self) -> str:
         return self.name
+
+
+class ProjectMembership(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='memberships',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='annotation_project_memberships',
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_annotation_project_memberships',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['project', 'user'],
+                name='unique_project_member',
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.project.name}: {self.user.username}'
 
 
 class AIModel(models.Model):
@@ -65,10 +105,46 @@ class ProjectClass(models.Model):
         return f'{self.project.name}: {self.name}'
 
 
+class Job(models.Model):
+    STATUS_NEW = 'new'
+    STATUS_IN_PROGRESS = 'in_progress'
+    STATUS_DONE = 'done'
+    STATUS_CHOICES = [
+        (STATUS_NEW, 'New'),
+        (STATUS_IN_PROGRESS, 'In progress'),
+        (STATUS_DONE, 'Done'),
+    ]
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='jobs')
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_annotation_jobs',
+    )
+    assignees = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='annotation_jobs',
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['project', 'name'], name='unique_project_job_name'),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.project.name}: {self.name}'
+
+
 def project_image_upload_to(instance, filename):
     ext = filename.split('.')[-1] if '.' in filename else ''
     name = f"{uuid.uuid4()}.{ext}" if ext else f"{uuid.uuid4()}"
-    return f"projects/{instance.project_id}/images/{name}"
+    return f"projects/{instance.job.project_id}/jobs/{instance.job_id}/images/{name}"
 
 
 class Image(models.Model):
@@ -81,14 +157,14 @@ class Image(models.Model):
         (STATUS_DONE, 'Done'),
     ]
 
-    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='images')
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name='images')
     file = models.ImageField(upload_to=project_image_upload_to)
     width = models.PositiveIntegerField()
     height = models.PositiveIntegerField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
 
     def __str__(self) -> str:
-        return f'{self.project.name}: {self.file.name}'
+        return f'{self.job.project.name}/{self.job.name}: {self.file.name}'
 
 
 class Annotation(models.Model):
@@ -143,3 +219,50 @@ class AutoAnnotateClassMapping(models.Model):
 
     def __str__(self) -> str:
         return f'{self.config.model.name}: {self.model_class} -> {self.project_class.name}'
+
+
+class AutoAnnotateJob(models.Model):
+    STATUS_PENDING = 'pending'
+    STATUS_RUNNING = 'running'
+    STATUS_COMPLETED = 'completed'
+    STATUS_FAILED = 'failed'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_RUNNING, 'Running'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    ]
+
+    job = models.ForeignKey(
+        Job,
+        related_name='auto_annotate_jobs',
+        on_delete=models.CASCADE,
+    )
+    config = models.ForeignKey(
+        AutoAnnotateConfig,
+        related_name='jobs',
+        on_delete=models.PROTECT,
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    queued_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    total_images = models.PositiveIntegerField(default=0)
+    processed_images = models.PositiveIntegerField(default=0)
+    annotations_created = models.PositiveIntegerField(default=0)
+    progress_percent = models.FloatField(default=0)
+    worker_id = models.CharField(max_length=100, blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', 'queued_at']),
+            models.Index(fields=['worker_id', 'locked_at']),
+        ]
+        ordering = ['-queued_at']
+
+    def __str__(self) -> str:
+        return f'{self.job}: {self.status}'

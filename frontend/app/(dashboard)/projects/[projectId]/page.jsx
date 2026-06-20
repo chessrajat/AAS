@@ -1,16 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
-  Crosshair,
-  Hand,
+  CheckCircle,
   Minus,
   Plus,
-  SlidersHorizontal,
-  Square,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -18,19 +15,12 @@ import HomeSidebar from "../../../components/HomeSidebar";
 import { useAuthStore } from "../../../stores/authStore";
 import { useApiStore } from "../../../stores/apiStore";
 import { toast } from "sonner";
+import AnnotationSidebar from "./components/AnnotationSidebar";
+import AnnotationToolSidebar from "./components/AnnotationToolSidebar";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -53,10 +43,13 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 export default function ProjectAnnotatePage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
+  const requestedJobId = searchParams.get("jobId") || "";
   const accessToken = useAuthStore((state) => state.accessToken);
   const {
-    uploadProjectImages,
-    fetchProjectImages,
+    uploadJobImages,
+    fetchJobImages,
+    fetchProjectJobs,
     fetchProject,
     fetchAnnotations,
     createAnnotation,
@@ -64,6 +57,7 @@ export default function ProjectAnnotatePage() {
     deleteAnnotation,
     createProjectClass,
     exportProject,
+    exportJob,
     deleteProjectClass,
     deleteImage,
     fetchAutoAnnotateConfigs,
@@ -71,7 +65,9 @@ export default function ProjectAnnotatePage() {
     models,
     createAutoAnnotateConfig,
     updateAutoAnnotateConfig,
-    runAutoAnnotate,
+    runJobAutoAnnotate,
+    fetchAutoAnnotateJob,
+    markImageDone,
   } = useApiStore();
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
@@ -84,12 +80,15 @@ export default function ProjectAnnotatePage() {
   const lastPointerPositionRef = useRef({ x: 0, y: 0 });
   const [isUploading, setIsUploading] = useState(false);
   const [images, setImages] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [activeJobId, setActiveJobId] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [imageJumpValue, setImageJumpValue] = useState("1");
   const [zoom, setZoom] = useState(1);
   const [project, setProject] = useState(null);
   const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [annotations, setAnnotations] = useState([]);
+  const [hiddenAnnotationIds, setHiddenAnnotationIds] = useState([]);
   const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false);
   const [activeTool, setActiveTool] = useState("draw");
   const [activeLabelId, setActiveLabelId] = useState(null);
@@ -111,6 +110,9 @@ export default function ProjectAnnotatePage() {
   const [autoAnnotateConfigs, setAutoAnnotateConfigs] = useState([]);
   const [isSavingAutoAnnotate, setIsSavingAutoAnnotate] = useState(false);
   const [isAutoAnnotating, setIsAutoAnnotating] = useState(false);
+  const [activeAutoAnnotateJobId, setActiveAutoAnnotateJobId] = useState(null);
+  const [autoAnnotateJobStatus, setAutoAnnotateJobStatus] = useState(null);
+  const [isMarkingImageDone, setIsMarkingImageDone] = useState(false);
   const [isSavingLabel, setIsSavingLabel] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#3b82f6");
@@ -133,12 +135,24 @@ export default function ProjectAnnotatePage() {
   const maxZoom = 3;
   const zoomStep = 0.05;
   const hasImages = images.length > 0;
+  const activeJob = jobs.find((job) => String(job.id) === String(activeJobId));
   const activeImage = hasImages ? images[activeIndex] : null;
+  const autoAnnotateStatus = autoAnnotateJobStatus?.status || "";
+  const autoAnnotateProgress = Math.round(autoAnnotateJobStatus?.progress_percent || 0);
+  const autoAnnotateButtonLabel = isAutoAnnotating
+    ? autoAnnotateStatus === "running"
+      ? `Auto annotate ${autoAnnotateProgress}%`
+      : "Auto annotate queued"
+    : "Auto annotate";
   const imageName = activeImage?.file?.split("/").pop() || "No image";
   const projectLabels = project?.classes ?? [];
   const hasLabels = projectLabels.length > 0;
   const activeLabel = projectLabels.find((label) => label.id === activeLabelId);
   const annotationCount = annotations.length;
+  const hiddenAnnotationIdSet = useMemo(
+    () => new Set(hiddenAnnotationIds),
+    [hiddenAnnotationIds],
+  );
   const keyboardShortcuts = [
     { key: "D", description: "Switch to Draw bounding box tool." },
     { key: "S", description: "Switch to Select/Move tool." },
@@ -149,6 +163,12 @@ export default function ProjectAnnotatePage() {
     { key: "Space (hold)", description: "Temporarily switch to Pan tool." },
     { key: "Delete", description: "Delete selected annotation." },
   ];
+
+  const imageStatusLabels = {
+    new: "New",
+    in_progress: "In progress",
+    done: "Done",
+  };
 
   useEffect(() => {
     if (!accessToken) {
@@ -161,15 +181,58 @@ export default function ProjectAnnotatePage() {
       return;
     }
 
+    let isMounted = true;
+    const loadJobs = async () => {
+      const result = await fetchProjectJobs(params.projectId);
+      if (result.ok) {
+        const nextJobs = result.data || [];
+        if (!isMounted) {
+          return;
+        }
+        setJobs(nextJobs);
+        const requestedJob = nextJobs.find(
+          (job) => String(job.id) === String(requestedJobId),
+        );
+        setActiveJobId(
+          requestedJob?.id
+            ? String(requestedJob.id)
+            : nextJobs[0]?.id
+              ? String(nextJobs[0].id)
+              : "",
+        );
+      }
+    };
+    loadJobs();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [accessToken, params?.projectId, fetchProjectJobs, requestedJobId]);
+
+  useEffect(() => {
+    if (!accessToken || !activeJobId) {
+      setImages([]);
+      setActiveIndex(0);
+      return;
+    }
+
+    let isMounted = true;
     const loadImages = async () => {
-      const result = await fetchProjectImages(params.projectId);
+      const result = await fetchJobImages(activeJobId);
+      if (!isMounted) {
+        return;
+      }
       if (result.ok) {
         setImages(result.data || []);
         setActiveIndex(0);
       }
     };
     loadImages();
-  }, [accessToken, params?.projectId, fetchProjectImages]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [accessToken, activeJobId, fetchJobImages]);
 
   useEffect(() => {
     if (!hasImages) {
@@ -181,6 +244,12 @@ export default function ProjectAnnotatePage() {
 
   useEffect(() => {
     setActiveLabelId(null);
+    setActiveJobId("");
+    setJobs([]);
+    setImages([]);
+    setIsAutoAnnotating(false);
+    setActiveAutoAnnotateJobId(null);
+    setAutoAnnotateJobStatus(null);
   }, [params?.projectId]);
 
   useEffect(() => {
@@ -200,6 +269,11 @@ export default function ProjectAnnotatePage() {
         if (result.data?.classes?.length && !activeLabelId) {
           setActiveLabelId(result.data.classes[0].id);
         }
+      } else {
+        toast.error("Project unavailable", {
+          description: result.error || "You do not have access to this project.",
+        });
+        router.replace("/");
       }
       setIsLoadingProject(false);
     };
@@ -208,7 +282,7 @@ export default function ProjectAnnotatePage() {
     return () => {
       isMounted = false;
     };
-  }, [accessToken, params?.projectId, fetchProject, activeLabelId]);
+  }, [accessToken, params?.projectId, fetchProject, activeLabelId, router]);
 
   useEffect(() => {
     if (!accessToken || !params?.projectId) {
@@ -298,32 +372,86 @@ export default function ProjectAnnotatePage() {
   };
 
   const handleRunAutoAnnotate = async () => {
-    if (!params?.projectId) {
+    if (!activeJobId) {
+      toast.error("Create or select a job first.");
       return;
     }
     setIsAutoAnnotating(true);
-    const result = await runAutoAnnotate(params.projectId);
-    setIsAutoAnnotating(false);
+    setAutoAnnotateJobStatus(null);
+    const result = await runJobAutoAnnotate(activeJobId);
     if (!result.ok) {
+      setIsAutoAnnotating(false);
       toast.error("Auto-annotate failed", {
         description: result.error || "Please try again.",
       });
       return;
     }
-    toast.success("Auto-annotate complete", {
-      description: `${result.data?.annotations_created || 0} annotations created.`,
+    setActiveAutoAnnotateJobId(result.data?.id || null);
+    setAutoAnnotateJobStatus(result.data || null);
+    toast.success("Auto-annotate queued", {
+      description: "The worker will process this job shortly.",
     });
-    if (activeImage?.id) {
-      const annotationsResult = await fetchAnnotations(activeImage.id);
-      if (annotationsResult.ok) {
-        setAnnotations(annotationsResult.data || []);
-      }
-    }
   };
+
+  useEffect(() => {
+    if (!isAutoAnnotating || !activeJobId || !activeAutoAnnotateJobId) {
+      return;
+    }
+
+    let isMounted = true;
+    const pollStatus = async () => {
+      const result = await fetchAutoAnnotateJob(activeJobId, activeAutoAnnotateJobId);
+      if (!isMounted || !result.ok) {
+        return;
+      }
+      const statusData = result.data;
+      setAutoAnnotateJobStatus(statusData);
+      if (statusData?.status === "completed") {
+        setIsAutoAnnotating(false);
+        toast.success("Auto-annotate complete", {
+          description: `${statusData.annotations_created || 0} annotations created.`,
+        });
+        if (activeImage?.id) {
+          const annotationsResult = await fetchAnnotations(activeImage.id);
+          if (isMounted && annotationsResult.ok) {
+            setAnnotations(annotationsResult.data || []);
+          }
+        }
+        const imagesResult = await fetchJobImages(activeJobId);
+        if (isMounted && imagesResult.ok) {
+          setImages(imagesResult.data || []);
+        }
+      } else if (statusData?.status === "failed") {
+        setIsAutoAnnotating(false);
+        toast.error("Auto-annotate failed", {
+          description: statusData.error_message || "Please try again.",
+        });
+      } else if (statusData?.status === "cancelled") {
+        setIsAutoAnnotating(false);
+        toast.error("Auto-annotate cancelled");
+      }
+    };
+
+    pollStatus();
+    const intervalId = window.setInterval(pollStatus, 2000);
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    activeAutoAnnotateJobId,
+    activeImage?.id,
+    activeJobId,
+    fetchAnnotations,
+    fetchAutoAnnotateJob,
+    fetchJobImages,
+    isAutoAnnotating,
+  ]);
 
   useEffect(() => {
     if (!activeImage?.id) {
       setAnnotations([]);
+      setHiddenAnnotationIds([]);
       return;
     }
 
@@ -336,6 +464,7 @@ export default function ProjectAnnotatePage() {
       }
       if (result.ok) {
         setAnnotations(result.data || []);
+        setHiddenAnnotationIds([]);
       }
       setIsLoadingAnnotations(false);
     };
@@ -468,7 +597,8 @@ export default function ProjectAnnotatePage() {
       }
       if (key === "q") {
         if (activeImage && !isDeleteImageOpen) {
-          handleOpenDeleteImage(activeImage);
+          setImageToDelete(activeImage);
+          setIsDeleteImageOpen(true);
         }
         return;
       }
@@ -532,12 +662,19 @@ export default function ProjectAnnotatePage() {
       setAnnotations((prev) =>
         prev.filter((annotation) => annotation.id !== selectedAnnotationId),
       );
+      if (activeImage?.id) {
+        setImages((prev) =>
+          prev.map((image) =>
+            image.id === activeImage.id ? { ...image, status: "in_progress" } : image,
+          ),
+        );
+      }
       setSelectedAnnotationId(null);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [deleteAnnotation, selectedAnnotationId]);
+  }, [activeImage?.id, deleteAnnotation, selectedAnnotationId]);
 
   useEffect(() => {
     if (!selectedAnnotationId) {
@@ -600,6 +737,17 @@ export default function ProjectAnnotatePage() {
     return imageMeta.displayWidth / imageMeta.naturalWidth;
   };
 
+  const updateActiveImageStatus = (status) => {
+    if (!activeImage?.id) {
+      return;
+    }
+    setImages((prev) =>
+      prev.map((image) =>
+        image.id === activeImage.id ? { ...image, status } : image,
+      ),
+    );
+  };
+
   const toDisplayBox = (annotation) => {
     const scale = getImageScale();
     return {
@@ -608,6 +756,70 @@ export default function ProjectAnnotatePage() {
       w: Math.round((annotation.x_max - annotation.x_min) * scale),
       h: Math.round((annotation.y_max - annotation.y_min) * scale),
     };
+  };
+
+  const handleDeleteAnnotation = async (annotationId) => {
+    const result = await deleteAnnotation(annotationId);
+    if (!result.ok) {
+      toast.error("Delete failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    setAnnotations((prev) =>
+      prev.filter((annotation) => annotation.id !== annotationId),
+    );
+    updateActiveImageStatus("in_progress");
+    setHiddenAnnotationIds((prev) => prev.filter((item) => item !== annotationId));
+    if (selectedAnnotationId === annotationId) {
+      setSelectedAnnotationId(null);
+    }
+  };
+
+  const handleToggleAnnotationVisibility = (annotationId) => {
+    setHiddenAnnotationIds((prev) =>
+      prev.includes(annotationId)
+        ? prev.filter((item) => item !== annotationId)
+        : [...prev, annotationId],
+    );
+  };
+
+  const handleSelectSidebarAnnotation = (annotationId) => {
+    setSelectedAnnotationId(annotationId);
+    setActiveTool("select");
+  };
+
+  const handleSidebarLabelClick = async (label) => {
+    if (activeTool === "select" && selectedAnnotationId) {
+      const selected = getAnnotationById(selectedAnnotationId);
+      if (!selected) {
+        return;
+      }
+      const payload = {
+        project_class: label.id,
+        x_min: selected.x_min,
+        y_min: selected.y_min,
+        x_max: selected.x_max,
+        y_max: selected.y_max,
+      };
+      const result = await updateAnnotation(selectedAnnotationId, payload);
+      if (!result.ok) {
+        toast.error("Update failed", {
+          description: result.error || "Please try again.",
+        });
+        return;
+      }
+      setAnnotations((prev) =>
+        prev.map((annotation) =>
+          annotation.id === selectedAnnotationId
+            ? { ...annotation, project_class: label.id }
+            : annotation,
+        ),
+      );
+      updateActiveImageStatus("in_progress");
+      return;
+    }
+    setActiveLabelId(label.id);
   };
 
   const getAnnotationById = (annotationId) =>
@@ -640,6 +852,9 @@ export default function ProjectAnnotatePage() {
     }
     for (let i = annotations.length - 1; i >= 0; i -= 1) {
       const annotation = annotations[i];
+      if (hiddenAnnotationIdSet.has(annotation.id)) {
+        continue;
+      }
       const box = toDisplayBox(annotation);
       if (
         pos.x >= box.x &&
@@ -665,6 +880,9 @@ export default function ProjectAnnotatePage() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     annotations.forEach((annotation) => {
+      if (hiddenAnnotationIdSet.has(annotation.id)) {
+        return;
+      }
       const label = projectLabels.find((item) => item.id === annotation.project_class);
       const displayBox = toDisplayBox(annotation);
       const color = label?.color || "#3b82f6";
@@ -683,7 +901,7 @@ export default function ProjectAnnotatePage() {
 
     if (selectedAnnotationId) {
       const selected = getAnnotationById(selectedAnnotationId);
-      if (selected) {
+      if (selected && !hiddenAnnotationIdSet.has(selected.id)) {
         const displayBox = toDisplayBox(selected);
         const handles = getHandlePositions(displayBox);
         ctx.fillStyle = "#0f172a";
@@ -703,9 +921,14 @@ export default function ProjectAnnotatePage() {
     imageMeta.displayHeight,
     projectLabels,
     selectedAnnotationId,
+    hiddenAnnotationIdSet,
   ]);
 
   const handleUploadClick = () => {
+    if (!activeJobId) {
+      toast.error("Create or select a job first.");
+      return;
+    }
     fileInputRef.current?.click();
   };
 
@@ -716,7 +939,7 @@ export default function ProjectAnnotatePage() {
     }
 
     setIsUploading(true);
-    const result = await uploadProjectImages(params?.projectId, files);
+    const result = await uploadJobImages(activeJobId, files);
     setIsUploading(false);
     event.target.value = "";
 
@@ -730,12 +953,16 @@ export default function ProjectAnnotatePage() {
     const nextImages = result.data || [];
     setImages(nextImages);
     setActiveIndex(0);
-    const refreshed = await fetchProjectImages(params?.projectId);
+    const refreshed = await fetchJobImages(activeJobId);
     if (refreshed.ok) {
       setImages(refreshed.data || []);
     }
+    const jobsResult = await fetchProjectJobs(params?.projectId);
+    if (jobsResult.ok) {
+      setJobs(jobsResult.data || []);
+    }
     toast.success("Images uploaded", {
-      description: `${files.length} image(s) added to the project.`,
+      description: `${files.length} image(s) added to ${activeJob?.name || "the job"}.`,
     });
   };
 
@@ -842,6 +1069,33 @@ export default function ProjectAnnotatePage() {
     setIsExporting(false);
   };
 
+  const handleExportJob = async () => {
+    if (!activeJobId) {
+      toast.error("Create or select a job first.");
+      return;
+    }
+    setIsExporting(true);
+    setExportProgress(0);
+    const result = await exportJob(activeJobId, setExportProgress);
+    if (!result.ok) {
+      toast.error("Export failed", {
+        description: result.error || "Please try again.",
+      });
+      setIsExporting(false);
+      return;
+    }
+
+    const blobUrl = window.URL.createObjectURL(result.data);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `job-${activeJobId}-yolov8.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+    setIsExporting(false);
+  };
+
   const handleOpenDeleteLabel = (label) => {
     setLabelToDelete(label);
     setIsDeleteLabelOpen(true);
@@ -887,10 +1141,10 @@ export default function ProjectAnnotatePage() {
     setLabelToDelete(null);
   };
 
-  const handleOpenDeleteImage = (image) => {
+  function handleOpenDeleteImage(image) {
     setImageToDelete(image);
     setIsDeleteImageOpen(true);
-  };
+  }
 
   const handleConfirmDeleteImage = async () => {
     if (!imageToDelete) {
@@ -912,6 +1166,28 @@ export default function ProjectAnnotatePage() {
     setAnnotations([]);
     setIsDeleteImageOpen(false);
     setImageToDelete(null);
+  };
+
+  const handleMarkImageDone = async () => {
+    if (!activeImage?.id) {
+      return;
+    }
+    setIsMarkingImageDone(true);
+    const result = await markImageDone(activeImage.id);
+    setIsMarkingImageDone(false);
+    if (!result.ok) {
+      toast.error("Unable to mark done", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    setImages((prev) =>
+      prev.map((image) =>
+        image.id === activeImage.id ? result.data : image,
+      ),
+    );
+    toast.success("Image marked done.");
+    setActiveIndex((prev) => Math.min(prev + 1, images.length - 1));
   };
 
   const openLabelDialog = () => {
@@ -1224,6 +1500,8 @@ export default function ProjectAnnotatePage() {
           toast.error("Update failed", {
             description: result.error || "Please try again.",
           });
+        } else {
+          updateActiveImageStatus("in_progress");
         }
       }
       return;
@@ -1245,6 +1523,8 @@ export default function ProjectAnnotatePage() {
           toast.error("Update failed", {
             description: result.error || "Please try again.",
           });
+        } else {
+          updateActiveImageStatus("in_progress");
         }
       }
       return;
@@ -1305,6 +1585,7 @@ export default function ProjectAnnotatePage() {
       return;
     }
     setAnnotations((prev) => [...prev, result.data]);
+    updateActiveImageStatus("in_progress");
   };
 
   const handleImageLoad = (event) => {
@@ -1336,10 +1617,10 @@ export default function ProjectAnnotatePage() {
     <SidebarProvider>
       <HomeSidebar />
       <SidebarInset>
-        <div className="relative flex h-full flex-1 overflow-hidden bg-slate-50 text-slate-900">
+        <div className="relative flex h-full flex-1 overflow-hidden bg-background text-foreground">
           {isExporting ? (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
-              <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#201d1d]/40">
+              <div className="rounded-sm border border-border bg-background px-6 py-5 text-center">
                 <p className="text-sm font-semibold text-slate-900">Exporting dataset</p>
                 <p className="mt-2 text-xs text-slate-500">
                   {exportProgress ? `${exportProgress}%` : "Preparing download..."}
@@ -1348,22 +1629,33 @@ export default function ProjectAnnotatePage() {
             </div>
           ) : null}
           {isAutoAnnotating ? (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40">
-              <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-lg">
-                <p className="text-sm font-semibold text-slate-900">Auto-annotating</p>
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#201d1d]/40">
+              <div className="rounded-sm border border-border bg-background px-6 py-5 text-center">
+                <p className="text-sm font-semibold text-slate-900">
+                  {autoAnnotateStatus === "running" ? "Auto-annotating" : "Auto-annotate queued"}
+                </p>
                 <p className="mt-2 text-xs text-slate-500">
-                  Running model on project images...
+                  {autoAnnotateStatus === "running"
+                    ? `${autoAnnotateJobStatus?.processed_images || 0}/${autoAnnotateJobStatus?.total_images || 0} images processed (${autoAnnotateProgress}%)`
+                    : "Waiting for the worker..."}
                 </p>
               </div>
             </div>
           ) : null}
 
           <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+        <header className="flex items-center justify-between border-b border-border bg-background px-4 py-3">
           <div className="flex items-center gap-3">
             <SidebarTrigger />
             <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
               Projects
+            </Link>
+            <ChevronRight className="h-4 w-4 text-slate-400" />
+            <Link
+              href={`/projects/${params?.projectId}/jobs`}
+              className="text-sm text-slate-500 hover:text-slate-900"
+            >
+              Jobs
             </Link>
             <ChevronRight className="h-4 w-4 text-slate-400" />
             <div>
@@ -1371,8 +1663,11 @@ export default function ProjectAnnotatePage() {
                 Annotation Workspace
               </p>
               <h1 className="text-lg font-semibold text-slate-900">
-                Project #1
+                {project?.name || `Project #${params?.projectId}`}
               </h1>
+              <p className="text-sm text-slate-500">
+                {activeJob?.name || "No job selected"}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -1384,115 +1679,35 @@ export default function ProjectAnnotatePage() {
               className="hidden"
               onChange={handleFilesSelected}
             />
-            <Button variant="outline" onClick={handleUploadClick} disabled={isUploading}>
+            <Button variant="outline" onClick={handleUploadClick} disabled={isUploading || !activeJobId}>
               {isUploading ? "Uploading..." : "Upload images"}
             </Button>
             <Button
               variant="secondary"
-              disabled={!hasAutoAnnotateConfig || isAutoAnnotating}
+              disabled={!activeJobId || !hasAutoAnnotateConfig || isAutoAnnotating}
               onClick={handleRunAutoAnnotate}
             >
-              Auto annotate
+              {autoAnnotateButtonLabel}
+            </Button>
+            <Button variant="outline" onClick={handleExportJob} disabled={isExporting || !activeJobId}>
+              {isExporting ? "Exporting..." : "Export job"}
             </Button>
             <Button variant="outline" onClick={handleExportProject} disabled={isExporting}>
-              {isExporting ? "Exporting..." : "Export dataset"}
+              Export project
             </Button>
           </div>
         </header>
 
         <div className="flex flex-1 overflow-hidden">
-          <aside className="hidden w-16 flex-col items-center gap-3 border-r border-slate-200 bg-white py-4 md:flex">
-            <TooltipProvider delayDuration={200}>
-              <div className="flex flex-1 flex-col items-center gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="icon"
-                      variant={activeTool === "draw" ? "secondary" : "ghost"}
-                      className={
-                        activeTool === "draw"
-                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
-                          : ""
-                      }
-                      onClick={() => setActiveTool("draw")}
-                    >
-                      <Square className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Draw bounding box</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="icon"
-                      variant={activeTool === "select" ? "secondary" : "ghost"}
-                      className={
-                        activeTool === "select"
-                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
-                          : ""
-                      }
-                      onClick={() => setActiveTool("select")}
-                    >
-                      <Crosshair className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Select or move box</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="icon"
-                      variant={activeTool === "pan" ? "secondary" : "ghost"}
-                      className={
-                        activeTool === "pan"
-                          ? "bg-slate-900 text-slate-100 hover:bg-slate-800"
-                          : ""
-                      }
-                      onClick={() => setActiveTool("pan")}
-                    >
-                      <Hand className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Pan canvas</TooltipContent>
-                </Tooltip>
-                <div className="h-px w-8 bg-slate-200" />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => setIsMappingDialogOpen(true)}
-                      className={
-                        hasAutoAnnotateConfig
-                          ? "text-emerald-600 hover:text-emerald-700"
-                          : ""
-                      }
-                    >
-                      <SlidersHorizontal className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Configure auto-annotate</TooltipContent>
-                </Tooltip>
-                <div className="mt-auto">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => setIsShortcutsDialogOpen(true)}
-                        aria-label="Show keyboard shortcuts"
-                      >
-                        <span className="text-sm font-semibold leading-none">i</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">Keyboard shortcuts</TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-            </TooltipProvider>
-          </aside>
-          <div className="flex flex-1 flex-col bg-slate-100">
-            <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-2 text-xs text-slate-500">
+          <AnnotationToolSidebar
+            activeTool={activeTool}
+            hasAutoAnnotateConfig={hasAutoAnnotateConfig}
+            onConfigureAutoAnnotate={() => setIsMappingDialogOpen(true)}
+            onShowShortcuts={() => setIsShortcutsDialogOpen(true)}
+            onToolChange={setActiveTool}
+          />
+          <div className="flex flex-1 flex-col bg-muted">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
               <Button
                 size="icon"
                 variant="ghost"
@@ -1525,7 +1740,7 @@ export default function ProjectAnnotatePage() {
                     onChange={handleImageJumpChange}
                     onKeyDown={handleImageJumpKeyDown}
                     disabled={!hasImages}
-                    className="h-7 w-16 bg-white px-2 text-xs"
+                    className="h-7 w-16 bg-background px-2 text-xs"
                     aria-label="Go to image number"
                   />
                   <Button
@@ -1539,6 +1754,11 @@ export default function ProjectAnnotatePage() {
                   </Button>
                 </div>
                 <span>{imageName}</span>
+                {hasImages ? (
+                  <Badge variant={activeImage?.status === "done" ? "default" : "outline"}>
+                    {imageStatusLabels[activeImage?.status] || activeImage?.status || "New"}
+                  </Badge>
+                ) : null}
                 {hasImages ? (
                   <Button
                     size="icon"
@@ -1571,15 +1791,17 @@ export default function ProjectAnnotatePage() {
               </div>
             </div>
             <div className="flex flex-1 items-center justify-center p-6">
-              <div className="relative flex h-full w-full max-w-4xl items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white">
+              <div className="relative flex h-full w-full max-w-4xl items-center justify-center rounded-sm border border-dashed border-border bg-background">
                 {!hasImages ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-6 py-4 text-center text-sm text-slate-500">
-                    No images available in this project. Please upload some.
+                  <div className="rounded-sm border border-border bg-muted px-6 py-4 text-center text-sm text-muted-foreground">
+                    {activeJobId
+                      ? "No images available in this job. Please upload some."
+                      : "Create or select a job to start adding images."}
                   </div>
                 ) : (
                   <div
                     ref={imageContainerRef}
-                    className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-slate-50"
+                    className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-sm bg-muted"
                   >
                     <div
                       className="relative"
@@ -1629,245 +1851,34 @@ export default function ProjectAnnotatePage() {
             </div>
           </div>
 
-          <aside className="flex h-full w-full max-w-sm min-h-0 flex-col border-l border-slate-200 bg-white pb-10">
-            <Tabs defaultValue="objects" className="flex h-full min-h-0 flex-col">
-              <TabsList className="grid w-full grid-cols-2 rounded-none bg-slate-100">
-                <TabsTrigger value="objects">Objects</TabsTrigger>
-                <TabsTrigger value="labels">Labels</TabsTrigger>
-              </TabsList>
-              <TabsContent value="objects" className="flex-1 min-h-0 overflow-hidden">
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="space-y-3 border-b border-slate-200 p-4">
-                    <Input placeholder="Search frames or IDs" className="bg-white" />
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{annotationCount} active</Badge>
-                      <Badge variant="outline">0 pending</Badge>
-                    </div>
-                  </div>
-                  <ScrollArea className="flex-1 min-h-0">
-                    <div className="space-y-3 p-4">
-                      {annotations.length === 0 ? (
-                        <Card className="border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
-                          {isLoadingAnnotations
-                            ? "Loading annotations..."
-                            : "No annotations yet for this image."}
-                        </Card>
-                      ) : (
-                        annotations.map((annotation) => {
-                          const label = projectLabels.find(
-                            (item) => item.id === annotation.project_class,
-                          );
-                          const width = annotation.x_max - annotation.x_min;
-                          const height = annotation.y_max - annotation.y_min;
-                          const labelColor = label?.color || "#3b82f6";
-                          return (
-                            <Card
-                              key={annotation.id}
-                              className={`border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-sm ${
-                                selectedAnnotationId === annotation.id
-                                  ? "ring-2 ring-slate-900 ring-offset-1"
-                                  : ""
-                              }`}
-                              onClick={() => {
-                                setSelectedAnnotationId(annotation.id);
-                                setActiveTool("select");
-                              }}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  setSelectedAnnotationId(annotation.id);
-                                  setActiveTool("select");
-                                }
-                              }}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span>Annotation #{annotation.id}</span>
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="secondary">
-                                    {label?.name || "Unlabeled"}
-                                  </Badge>
-                                  {selectedAnnotationId === annotation.id ? (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={async (event) => {
-                                        event.stopPropagation();
-                                        const result = await deleteAnnotation(annotation.id);
-                                        if (!result.ok) {
-                                          toast.error("Delete failed", {
-                                            description:
-                                              result.error || "Please try again.",
-                                          });
-                                          return;
-                                        }
-                                        setAnnotations((prev) =>
-                                          prev.filter((item) => item.id !== annotation.id),
-                                        );
-                                        setSelectedAnnotationId(null);
-                                      }}
-                                    >
-                                      Delete
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              </div>
-                              <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-                                <span>{width} × {height}</span>
-                                <span>•</span>
-                                <span
-                                  className="h-3.5 w-3.5 rounded-full border border-slate-300 shadow-sm"
-                                  style={{ backgroundColor: labelColor }}
-                                  aria-label={`Color preview ${labelColor}`}
-                                  title={labelColor}
-                                />
-                                <span className="font-mono">{labelColor}</span>
-                              </div>
-                            </Card>
-                          );
-                        })
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </TabsContent>
-              <TabsContent value="labels" className="flex-1 min-h-0 overflow-hidden">
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="border-b border-slate-200 p-4">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                      Label set
-                    </p>
-                    <div className="mt-2 flex items-center justify-between">
-                      <h2 className="text-base font-semibold text-slate-900">
-                        Project classes
-                      </h2>
-                      <Button size="sm" variant="outline" onClick={openLabelDialog}>
-                        Add label
-                      </Button>
-                    </div>
-                  </div>
-                  <ScrollArea className="flex-1 min-h-0">
-                    <div className="space-y-3 p-4">
-                      {!hasLabels ? (
-                        <Card className="border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
-                          {isLoadingProject
-                            ? "Loading labels..."
-                            : "No labels defined for this project yet."}
-                        </Card>
-                      ) : (
-                        projectLabels.map((label) => {
-                          const labelColor = label.color || "#3b82f6";
-                          return (
-                            <Card
-                              key={label.id}
-                              className={`border-slate-200 bg-white p-3 text-sm ${
-                                activeLabelId === label.id
-                                  ? "ring-2 ring-slate-900 ring-offset-1"
-                                  : ""
-                              }`}
-                              onClick={async () => {
-                                if (activeTool === "select" && selectedAnnotationId) {
-                                  const selected = getAnnotationById(selectedAnnotationId);
-                                  if (!selected) {
-                                    return;
-                                  }
-                                  const payload = {
-                                    project_class: label.id,
-                                    x_min: selected.x_min,
-                                    y_min: selected.y_min,
-                                    x_max: selected.x_max,
-                                    y_max: selected.y_max,
-                                  };
-                                  const result = await updateAnnotation(
-                                    selectedAnnotationId,
-                                    payload,
-                                  );
-                                  if (!result.ok) {
-                                    toast.error("Update failed", {
-                                      description: result.error || "Please try again.",
-                                    });
-                                    return;
-                                  }
-                                  setAnnotations((prev) =>
-                                    prev.map((annotation) =>
-                                      annotation.id === selectedAnnotationId
-                                        ? { ...annotation, project_class: label.id }
-                                        : annotation,
-                                    ),
-                                  );
-                                  return;
-                                }
-                                setActiveLabelId(label.id);
-                              }}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={async (event) => {
-                                if (event.key !== "Enter" && event.key !== " ") {
-                                  return;
-                                }
-                                event.preventDefault();
-                                if (activeTool === "select" && selectedAnnotationId) {
-                                  const selected = getAnnotationById(selectedAnnotationId);
-                                  if (!selected) {
-                                    return;
-                                  }
-                                  const payload = {
-                                    project_class: label.id,
-                                    x_min: selected.x_min,
-                                    y_min: selected.y_min,
-                                    x_max: selected.x_max,
-                                    y_max: selected.y_max,
-                                  };
-                                  const result = await updateAnnotation(
-                                    selectedAnnotationId,
-                                    payload,
-                                  );
-                                  if (!result.ok) {
-                                    toast.error("Update failed", {
-                                      description: result.error || "Please try again.",
-                                    });
-                                    return;
-                                  }
-                                  setAnnotations((prev) =>
-                                    prev.map((annotation) =>
-                                      annotation.id === selectedAnnotationId
-                                        ? { ...annotation, project_class: label.id }
-                                        : annotation,
-                                    ),
-                                  );
-                                  return;
-                                }
-                                setActiveLabelId(label.id);
-                              }}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className="h-2.5 w-2.5 rounded-full"
-                                    style={{ backgroundColor: labelColor }}
-                                  />
-                                  <span className="font-medium text-slate-900">
-                                    {label.name}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-slate-400">
-                                    Index {label.index}
-                                  </span>
-                                </div>
-                              </div>
-                              <p className="mt-2 text-xs text-slate-500">
-                                Tap to assign to selected box.
-                              </p>
-                            </Card>
-                          );
-                        })
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </TabsContent>
-            </Tabs>
+          <aside className="flex h-full w-full max-w-sm min-h-0 flex-col border-l border-border bg-background">
+            <AnnotationSidebar
+              activeLabelId={activeLabelId}
+              annotationCount={annotationCount}
+              annotations={annotations}
+              hiddenAnnotationIdSet={hiddenAnnotationIdSet}
+              isLoadingAnnotations={isLoadingAnnotations}
+              isLoadingProject={isLoadingProject}
+              onAddLabel={openLabelDialog}
+              onDeleteAnnotation={handleDeleteAnnotation}
+              onLabelClick={handleSidebarLabelClick}
+              onSelectAnnotation={handleSelectSidebarAnnotation}
+              onToggleAnnotationVisibility={handleToggleAnnotationVisibility}
+              projectLabels={projectLabels}
+              selectedAnnotationId={selectedAnnotationId}
+            />
+
+            <div className="border-t border-border p-4">
+              <Button
+                type="button"
+                className="w-full"
+                onClick={handleMarkImageDone}
+                disabled={!activeImage || isMarkingImageDone}
+              >
+                <CheckCircle className="mr-2 h-4 w-4" />
+                {isMarkingImageDone ? "Marking..." : "Mark done & next"}
+              </Button>
+            </div>
 
             <Dialog open={isLabelDialogOpen} onOpenChange={setIsLabelDialogOpen}>
               <DialogContent>

@@ -9,11 +9,17 @@ export const useApiStore = create((set) => ({
   projects: [],
   models: [],
   users: [],
+  trainingPipelines: [],
+  trainingDatasets: [],
   isLoadingProjects: false,
   isLoadingModels: false,
   isLoadingUsers: false,
+  isLoadingTrainingPipelines: false,
+  isLoadingTrainingDatasets: false,
   isCreatingProject: false,
   isCreatingModel: false,
+  isCreatingTrainingPipeline: false,
+  isCreatingTrainingDataset: false,
   error: null,
   clearError: () => set({ error: null }),
   fetchProjects: async (token) => {
@@ -235,9 +241,114 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
-  uploadProjectImages: async (projectId, files) => {
+  fetchProjectJobs: async (projectId) => {
     set({ error: null });
-    if (!projectId || !files || files.length === 0) {
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/annotate/projects/${projectId}/jobs/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load jobs");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchProjectUsers: async (projectId) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/annotate/projects/${projectId}/users/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load project users");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchProjectAssignableUsers: async (projectId) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/projects/${projectId}/assignable-users/`,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load assignable users");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateProjectUsers: async (projectId, userIds) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/annotate/projects/${projectId}/users/`, {
+        user_ids: userIds,
+      });
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update project users");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createProjectJob: async (projectId, payload) => {
+    set({ error: null });
+    if (!projectId) {
+      return { ok: false, error: "Missing project id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/annotate/projects/${projectId}/jobs/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateJob: async (jobId, payload) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/annotate/jobs/${jobId}/`, payload);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteJob: async (jobId) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
+    }
+    try {
+      await apiClient.delete(`/api/annotate/jobs/${jobId}/`);
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadJobImages: async (jobId, files) => {
+    set({ error: null });
+    if (!jobId || !files || files.length === 0) {
       return { ok: false, error: "No images selected" };
     }
     try {
@@ -247,17 +358,10 @@ export const useApiStore = create((set) => ({
       });
 
       const response = await uploadClient.post(
-        `/api/annotate/projects/${projectId}/images/`,
+        `/api/annotate/jobs/${jobId}/images/`,
         formData,
       );
       const data = response.data;
-      set((state) => ({
-        projects: state.projects.map((project) =>
-          project.id === Number(projectId)
-            ? { ...project, images: data }
-            : project,
-        ),
-      }));
       return { ok: true, data };
     } catch (error) {
       const message = getApiErrorMessage(error, "Upload failed");
@@ -265,18 +369,44 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
-  fetchProjectImages: async (projectId) => {
+  fetchJobImages: async (jobId) => {
     set({ error: null });
-    if (!projectId) {
-      return { ok: false, error: "Missing project id" };
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
     }
     try {
       const response = await apiClient.get(
-        `/api/annotate/projects/${projectId}/images/`,
+        `/api/annotate/jobs/${jobId}/images/`,
       );
       return { ok: true, data: response.data };
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to load images");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  exportJob: async (jobId, onProgress) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/jobs/${jobId}/export/`,
+        {
+          responseType: "blob",
+          onDownloadProgress: (event) => {
+            if (!onProgress || !event.total) {
+              return;
+            }
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          },
+        },
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to export job");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -383,6 +513,20 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  markImageDone: async (imageId) => {
+    set({ error: null });
+    if (!imageId) {
+      return { ok: false, error: "Missing image id" };
+    }
+    try {
+      const response = await apiClient.post(`/api/annotate/images/${imageId}/mark-done/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to mark image done");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
   updateProject: async (projectId, payload) => {
     set({ error: null });
     if (!projectId) {
@@ -416,6 +560,406 @@ export const useApiStore = create((set) => ({
       return { ok: true };
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to delete project");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingPipelines: async () => {
+    set({ isLoadingTrainingPipelines: true, error: null });
+    try {
+      const response = await apiClient.get("/api/train/pipelines/");
+      const data = response.data;
+      set({ isLoadingTrainingPipelines: false, trainingPipelines: data });
+      return { ok: true, data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training pipelines");
+      set({ isLoadingTrainingPipelines: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingDatasets: async () => {
+    set({ isLoadingTrainingDatasets: true, error: null });
+    try {
+      const response = await apiClient.get("/api/train/datasets/");
+      set({ isLoadingTrainingDatasets: false, trainingDatasets: response.data });
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training datasets");
+      set({ isLoadingTrainingDatasets: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingDataset: async (payload) => {
+    set({ isCreatingTrainingDataset: true, error: null });
+    try {
+      const response = await apiClient.post("/api/train/datasets/", payload);
+      set((state) => ({
+        isCreatingTrainingDataset: false,
+        trainingDatasets: [response.data, ...state.trainingDatasets],
+      }));
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create training dataset");
+      set({ isCreatingTrainingDataset: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteTrainingDataset: async (datasetId) => {
+    set({ error: null });
+    if (!datasetId) {
+      return { ok: false, error: "Missing training dataset id" };
+    }
+    try {
+      await apiClient.delete(`/api/train/datasets/${datasetId}/`);
+      set((state) => ({
+        trainingDatasets: state.trainingDatasets.filter(
+          (dataset) => dataset.id !== datasetId,
+        ),
+      }));
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete training dataset");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingDatasetAssets: async (datasetId, page = 1) => {
+    set({ error: null });
+    if (!datasetId) {
+      return { ok: false, error: "Missing training dataset id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/train/datasets/${datasetId}/assets/`,
+        { params: { page } },
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load dataset assets");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadTrainingDatasetAssets: async (datasetId, images, labels) => {
+    set({ error: null });
+    if (!datasetId || !images || images.length === 0) {
+      return { ok: false, error: "No images selected" };
+    }
+    try {
+      const formData = new FormData();
+      Array.from(images).forEach((file) => formData.append("images", file));
+      Array.from(labels || []).forEach((file) => formData.append("labels", file));
+      const response = await uploadClient.post(
+        `/api/train/datasets/${datasetId}/assets/upload/`,
+        formData,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Dataset upload failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadTrainingDatasetZip: async (datasetId, archive) => {
+    set({ error: null });
+    if (!datasetId || !archive) {
+      return { ok: false, error: "No ZIP archive selected" };
+    }
+    try {
+      const formData = new FormData();
+      formData.append("archive", archive);
+      const response = await uploadClient.post(
+        `/api/train/datasets/${datasetId}/assets/upload-zip/`,
+        formData,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Dataset ZIP upload failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingPipeline: async (payload) => {
+    set({ isCreatingTrainingPipeline: true, error: null });
+    try {
+      const response = await apiClient.post("/api/train/pipelines/", payload);
+      const data = response.data;
+      set((state) => ({
+        isCreatingTrainingPipeline: false,
+        trainingPipelines: [data, ...state.trainingPipelines],
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create training pipeline");
+      set({ isCreatingTrainingPipeline: false, error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingPipeline: async (pipelineId) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/pipelines/${pipelineId}/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training pipeline");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingClass: async (pipelineId, payload) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/train/pipelines/${pipelineId}/classes/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to create training class");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateTrainingClass: async (classId, payload) => {
+    set({ error: null });
+    if (!classId) {
+      return { ok: false, error: "Missing class id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/train/classes/${classId}/`, payload);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update training class");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteTrainingClass: async (classId) => {
+    set({ error: null });
+    if (!classId) {
+      return { ok: false, error: "Missing class id" };
+    }
+    try {
+      await apiClient.delete(`/api/train/classes/${classId}/`);
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete training class");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadTrainingItems: async (pipelineId, images, labels) => {
+    set({ error: null });
+    if (!pipelineId || !images || images.length === 0) {
+      return { ok: false, error: "No images selected" };
+    }
+    try {
+      const formData = new FormData();
+      Array.from(images).forEach((file) => formData.append("images", file));
+      Array.from(labels || []).forEach((file) => formData.append("labels", file));
+      const response = await uploadClient.post(
+        `/api/train/pipelines/${pipelineId}/items/upload/`,
+        formData,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Upload failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  uploadTrainingZip: async (pipelineId, archive) => {
+    set({ error: null });
+    if (!pipelineId || !archive) {
+      return { ok: false, error: "No ZIP archive selected" };
+    }
+    try {
+      const formData = new FormData();
+      formData.append("archive", archive);
+      const response = await uploadClient.post(
+        `/api/train/pipelines/${pipelineId}/items/upload-zip/`,
+        formData,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "ZIP upload failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingItems: async (pipelineId) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/pipelines/${pipelineId}/items/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training items");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  applyTrainingSplit: async (pipelineId, payload) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/train/pipelines/${pipelineId}/apply-split/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to apply split");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingConfig: async (pipelineId, payload) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/train/pipelines/${pipelineId}/configs/`,
+        payload,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to save training configuration");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingConfigs: async (pipelineId) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/pipelines/${pipelineId}/configs/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training configurations");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  updateTrainingConfig: async (configId, payload) => {
+    set({ error: null });
+    if (!configId) {
+      return { ok: false, error: "Missing training configuration id" };
+    }
+    try {
+      const response = await apiClient.patch(`/api/train/configs/${configId}/`, payload);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to update training configuration");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  createTrainingJob: async (pipelineId, configId, datasetId) => {
+    set({ error: null });
+    if (!pipelineId || !configId || !datasetId) {
+      return { ok: false, error: "Missing training configuration or dataset" };
+    }
+    try {
+      const response = await apiClient.post(
+        `/api/train/pipelines/${pipelineId}/jobs/`,
+        { config: configId, dataset: datasetId },
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to queue training job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingJobs: async (pipelineId) => {
+    set({ error: null });
+    if (!pipelineId) {
+      return { ok: false, error: "Missing pipeline id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/pipelines/${pipelineId}/jobs/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training jobs");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchTrainingJobArtifacts: async (jobId) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing training job id" };
+    }
+    try {
+      const response = await apiClient.get(`/api/train/jobs/${jobId}/artifacts/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load training artifacts");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  downloadTrainingArtifact: async (artifactId, onProgress) => {
+    set({ error: null });
+    if (!artifactId) {
+      return { ok: false, error: "Missing training artifact id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/train/artifacts/${artifactId}/download/`,
+        {
+          responseType: "blob",
+          onDownloadProgress: (event) => {
+            if (!onProgress || !event.total) {
+              return;
+            }
+            onProgress(Math.round((event.loaded / event.total) * 100));
+          },
+        },
+      );
+      return { ok: true, data: response.data, headers: response.headers };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to download training artifact");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  downloadTrainingJobArtifactsZip: async (jobId, onProgress) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing training job id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/train/jobs/${jobId}/artifacts/download-zip/`,
+        {
+          responseType: "blob",
+          onDownloadProgress: (event) => {
+            if (!onProgress || !event.total) {
+              return;
+            }
+            onProgress(Math.round((event.loaded / event.total) * 100));
+          },
+        },
+      );
+      return { ok: true, data: response.data, headers: response.headers };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to download training artifacts");
       set({ error: message });
       return { ok: false, error: message };
     }
@@ -470,19 +1014,35 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
-  runAutoAnnotate: async (projectId, payload) => {
+  runJobAutoAnnotate: async (jobId, payload) => {
     set({ error: null });
-    if (!projectId) {
-      return { ok: false, error: "Missing project id" };
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
     }
     try {
       const response = await apiClient.post(
-        `/api/annotate/projects/${projectId}/auto-annotate/run/`,
+        `/api/annotate/jobs/${jobId}/auto-annotate/run/`,
         payload || {},
       );
       return { ok: true, data: response.data };
     } catch (error) {
       const message = getApiErrorMessage(error, "Auto-annotate failed");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchAutoAnnotateJob: async (jobId, autoAnnotateJobId) => {
+    set({ error: null });
+    if (!jobId || !autoAnnotateJobId) {
+      return { ok: false, error: "Missing auto-annotate job id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/jobs/${jobId}/auto-annotate/jobs/${autoAnnotateJobId}/`,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load auto-annotate status");
       set({ error: message });
       return { ok: false, error: message };
     }

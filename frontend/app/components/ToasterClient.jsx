@@ -10,9 +10,9 @@ export default function ToasterClient() {
       closeButton
       toastOptions={{
         classNames: {
-          toast: "rounded-2xl border border-slate-200 bg-white text-slate-900",
+          toast: "rounded-sm border bg-background text-foreground shadow-none",
           title: "text-sm font-semibold",
-          description: "text-xs text-slate-600",
+          description: "text-xs text-muted-foreground",
         },
       }}
     />

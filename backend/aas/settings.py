@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'accounts.apps.AccountsConfig',
     'annotate.apps.AnnotateConfig',
+    'train.apps.TrainConfig',
 ]
 
 MIDDLEWARE = [
@@ -143,6 +144,41 @@ STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+TRAINING_WORK_DIR = os.getenv('TRAINING_WORK_DIR', str(BASE_DIR / 'training_work'))
+YOLO_DEVICE = os.getenv('YOLO_DEVICE', '').strip()
+SERVE_MEDIA_FILES = os.getenv('SERVE_MEDIA_FILES', 'False').lower() in {'1', 'true', 'yes', 'on'}
+
+if os.getenv('USE_S3_STORAGE', 'False').lower() in {'1', 'true', 'yes', 'on'}:
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME', 'aas-media')
+    AWS_S3_ENDPOINT_URL = os.getenv('AWS_S3_ENDPOINT_URL')
+    AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'us-east-1')
+    AWS_S3_ADDRESSING_STYLE = os.getenv('AWS_S3_ADDRESSING_STYLE', 'path')
+    AWS_S3_SIGNATURE_VERSION = os.getenv('AWS_S3_SIGNATURE_VERSION', 's3v4')
+    AWS_S3_PROXY_URLS = os.getenv('AWS_S3_PROXY_URLS', 'False').lower() in {'1', 'true', 'yes', 'on'}
+    AWS_QUERYSTRING_AUTH = os.getenv('AWS_QUERYSTRING_AUTH', 'False').lower() in {'1', 'true', 'yes', 'on'}
+    AWS_DEFAULT_ACL = None
+    AWS_S3_FILE_OVERWRITE = False
+
+    s3_public_endpoint = os.getenv('AWS_S3_PUBLIC_ENDPOINT_URL')
+    if s3_public_endpoint:
+        public_endpoint = s3_public_endpoint.removeprefix('http://').removeprefix('https://').rstrip('/')
+        AWS_S3_CUSTOM_DOMAIN = f'{public_endpoint}/{AWS_STORAGE_BUCKET_NAME}'
+        AWS_S3_URL_PROTOCOL = 'https:' if s3_public_endpoint.startswith('https://') else 'http:'
+
+    media_location = os.getenv('AWS_MEDIA_LOCATION', 'media').strip('/')
+    static_location = os.getenv('AWS_STATIC_LOCATION', 'static').strip('/')
+    MEDIA_URL = f'{AWS_S3_URL_PROTOCOL}//{AWS_S3_CUSTOM_DOMAIN}/{media_location}/' if s3_public_endpoint else MEDIA_URL
+    STATIC_URL = f'{AWS_S3_URL_PROTOCOL}//{AWS_S3_CUSTOM_DOMAIN}/{static_location}/' if s3_public_endpoint else STATIC_URL
+    STORAGES = {
+        'default': {
+            'BACKEND': 'aas.storage.MinioMediaStorage',
+        },
+        'staticfiles': {
+            'BACKEND': 'aas.storage.MinioStaticStorage',
+        },
+    }
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
