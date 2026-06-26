@@ -59,6 +59,7 @@ def run_auto_annotate_job(auto_annotate_job):
         result = run_auto_annotation(
             auto_annotate_job.job,
             auto_annotate_job.config,
+            mode=auto_annotate_job.mode,
             progress_callback=update_progress,
         )
         processed_images = int(result.get('images_processed') or 0)

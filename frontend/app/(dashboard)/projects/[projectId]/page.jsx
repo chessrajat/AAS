@@ -106,6 +106,7 @@ export default function ProjectAnnotatePage() {
   const [isMappingDialogOpen, setIsMappingDialogOpen] = useState(false);
   const [hasAutoAnnotateConfig, setHasAutoAnnotateConfig] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState("");
+  const [autoAnnotateMode, setAutoAnnotateMode] = useState("skip");
   const [classMappings, setClassMappings] = useState({});
   const [autoAnnotateConfigs, setAutoAnnotateConfigs] = useState([]);
   const [isSavingAutoAnnotate, setIsSavingAutoAnnotate] = useState(false);
@@ -315,6 +316,7 @@ export default function ProjectAnnotatePage() {
   useEffect(() => {
     if (!selectedModelId) {
       setClassMappings({});
+      setAutoAnnotateMode("skip");
       return;
     }
     const config = autoAnnotateConfigs.find(
@@ -322,6 +324,7 @@ export default function ProjectAnnotatePage() {
     );
     if (!config) {
       setClassMappings({});
+      setAutoAnnotateMode("skip");
       return;
     }
     const nextMappings = {};
@@ -329,6 +332,7 @@ export default function ProjectAnnotatePage() {
       nextMappings[mapping.model_class] = String(mapping.project_class);
     });
     setClassMappings(nextMappings);
+    setAutoAnnotateMode(config.mode || "skip");
   }, [selectedModelId, autoAnnotateConfigs]);
 
   const handleSaveAutoAnnotate = async () => {
@@ -348,6 +352,7 @@ export default function ProjectAnnotatePage() {
     );
     const payload = {
       model_id: Number(selectedModelId),
+      mode: autoAnnotateMode,
       mappings,
     };
     const result = existingConfig
@@ -1955,6 +1960,20 @@ export default function ProjectAnnotatePage() {
                         {model.name}
                       </NativeSelectOption>
                     ))}
+                    </NativeSelect>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700" htmlFor="auto-annotate-mode">
+                      Mode
+                    </label>
+                    <NativeSelect
+                      id="auto-annotate-mode"
+                      className="w-full"
+                      value={autoAnnotateMode}
+                      onChange={(event) => setAutoAnnotateMode(event.target.value)}
+                    >
+                      <NativeSelectOption value="skip">Skip existing classes</NativeSelectOption>
+                      <NativeSelectOption value="override">Override annotations</NativeSelectOption>
                     </NativeSelect>
                   </div>
                   {!selectedModelId ? (

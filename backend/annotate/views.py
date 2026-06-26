@@ -426,6 +426,7 @@ class JobViewSet(viewsets.ModelViewSet):
         auto_annotate_job = AutoAnnotateJob.objects.create(
             job=job,
             config=config,
+            mode=config.mode,
             total_images=job.images.count(),
         )
         return Response(

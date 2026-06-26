@@ -180,9 +180,17 @@ class Annotation(models.Model):
 
 
 class AutoAnnotateConfig(models.Model):
+    MODE_SKIP = 'skip'
+    MODE_OVERRIDE = 'override'
+    MODE_CHOICES = [
+        (MODE_SKIP, 'Skip existing classes'),
+        (MODE_OVERRIDE, 'Override annotations'),
+    ]
+
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='auto_annotate_configs')
     model = models.ForeignKey(AIModel, on_delete=models.CASCADE, related_name='auto_annotate_configs')
     is_active = models.BooleanField(default=True)
+    mode = models.CharField(max_length=20, choices=MODE_CHOICES, default=MODE_SKIP)
 
     class Meta:
         constraints = [
@@ -244,6 +252,11 @@ class AutoAnnotateJob(models.Model):
         AutoAnnotateConfig,
         related_name='jobs',
         on_delete=models.PROTECT,
+    )
+    mode = models.CharField(
+        max_length=20,
+        choices=AutoAnnotateConfig.MODE_CHOICES,
+        default=AutoAnnotateConfig.MODE_SKIP,
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     queued_at = models.DateTimeField(auto_now_add=True)

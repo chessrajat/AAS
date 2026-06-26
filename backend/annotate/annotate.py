@@ -48,7 +48,10 @@ def get_auto_annotate_config(project, model_id=None):
     return config
 
 
-def run_auto_annotation(job, config, progress_callback=None):
+def run_auto_annotation(job, config, mode=None, progress_callback=None):
+    mode = mode or getattr(config, 'mode', AutoAnnotateConfig.MODE_SKIP)
+    if mode not in {AutoAnnotateConfig.MODE_SKIP, AutoAnnotateConfig.MODE_OVERRIDE}:
+        raise AutoAnnotateError("Invalid auto-annotate mode.")
     if not config.model.file:
         raise AutoAnnotateError("Model file is missing.")
 
@@ -97,10 +100,14 @@ def run_auto_annotation(job, config, progress_callback=None):
 
             result = results[0]
             boxes = result.boxes
-            Annotation.objects.filter(image=image).delete()
-            if image.status != Image.STATUS_IN_PROGRESS:
-                image.status = Image.STATUS_IN_PROGRESS
-                image.save(update_fields=['status'])
+            existing_project_class_ids = set()
+            if mode == AutoAnnotateConfig.MODE_OVERRIDE:
+                Annotation.objects.filter(image=image).delete()
+            else:
+                existing_project_class_ids = set(
+                    Annotation.objects.filter(image=image)
+                    .values_list('project_class_id', flat=True)
+                )
 
             if boxes is None or boxes.cls is None or boxes.xyxy is None:
                 processed_images += 1
@@ -113,6 +120,8 @@ def run_auto_annotation(job, config, progress_callback=None):
                 class_index = int(cls_id)
                 project_class = mappings.get(class_index)
                 if not project_class:
+                    continue
+                if project_class.id in existing_project_class_ids:
                     continue
 
                 x_min, y_min, x_max, y_max = coords

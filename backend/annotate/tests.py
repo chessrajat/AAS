@@ -140,6 +140,120 @@ class AutoAnnotateStorageTests(TestCase):
         self.assertNotEqual(fake_model.predict.call_args.kwargs['source'], image.file.name)
         self.assertEqual(fake_model.predict.call_args.kwargs['device'], '0')
         self.assertTrue(Annotation.objects.filter(image=image, project_class=project_class).exists())
+        image.refresh_from_db()
+        self.assertEqual(image.status, Image.STATUS_NEW)
+
+    @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS)
+    def test_auto_annotate_skip_mode_keeps_existing_class_annotations(self):
+        NoPathMemoryStorage.files = {
+            'models/model.pt': b'model',
+            'projects/1/jobs/1/images/image.jpg': b'image',
+        }
+        project = Project.objects.create(name='Project')
+        job = Job.objects.create(project=project, name='Job')
+        existing_class = ProjectClass.objects.create(project=project, name='Existing', index=0)
+        new_class = ProjectClass.objects.create(project=project, name='New', index=1)
+        image = Image.objects.create(
+            job=job,
+            file='projects/1/jobs/1/images/image.jpg',
+            width=100,
+            height=100,
+        )
+        existing_annotation = Annotation.objects.create(
+            image=image,
+            project_class=existing_class,
+            x_min=1,
+            y_min=2,
+            x_max=20,
+            y_max=30,
+        )
+        ai_model = AIModel.objects.create(
+            name='Model',
+            file='models/model.pt',
+            classes=['Existing', 'New'],
+        )
+        config = AutoAnnotateConfig.objects.create(
+            project=project,
+            model=ai_model,
+            mode=AutoAnnotateConfig.MODE_SKIP,
+        )
+        AutoAnnotateClassMapping.objects.create(
+            config=config,
+            model_class=0,
+            project_class=existing_class,
+        )
+        AutoAnnotateClassMapping.objects.create(
+            config=config,
+            model_class=1,
+            project_class=new_class,
+        )
+        fake_boxes = mock.Mock()
+        fake_boxes.cls.tolist.return_value = [0, 1]
+        fake_boxes.xyxy.tolist.return_value = [[10, 20, 80, 90], [30, 40, 70, 95]]
+        fake_result = mock.Mock(boxes=fake_boxes)
+        fake_model = mock.Mock()
+        fake_model.predict.return_value = [fake_result]
+
+        with mock.patch('annotate.annotate.YOLO', return_value=fake_model):
+            result = run_auto_annotation(job, config, mode=AutoAnnotateConfig.MODE_SKIP)
+
+        self.assertEqual(result, {'images_processed': 1, 'annotations_created': 1})
+        existing_annotation.refresh_from_db()
+        self.assertEqual(existing_annotation.x_min, 1)
+        self.assertTrue(Annotation.objects.filter(image=image, project_class=new_class).exists())
+        self.assertEqual(Annotation.objects.filter(image=image, project_class=existing_class).count(), 1)
+
+    @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS)
+    def test_auto_annotate_override_mode_replaces_existing_annotations(self):
+        NoPathMemoryStorage.files = {
+            'models/model.pt': b'model',
+            'projects/1/jobs/1/images/image.jpg': b'image',
+        }
+        project = Project.objects.create(name='Project')
+        job = Job.objects.create(project=project, name='Job')
+        existing_class = ProjectClass.objects.create(project=project, name='Existing', index=0)
+        image = Image.objects.create(
+            job=job,
+            file='projects/1/jobs/1/images/image.jpg',
+            width=100,
+            height=100,
+        )
+        Annotation.objects.create(
+            image=image,
+            project_class=existing_class,
+            x_min=1,
+            y_min=2,
+            x_max=20,
+            y_max=30,
+        )
+        ai_model = AIModel.objects.create(
+            name='Model',
+            file='models/model.pt',
+            classes=['Existing'],
+        )
+        config = AutoAnnotateConfig.objects.create(
+            project=project,
+            model=ai_model,
+            mode=AutoAnnotateConfig.MODE_OVERRIDE,
+        )
+        AutoAnnotateClassMapping.objects.create(
+            config=config,
+            model_class=0,
+            project_class=existing_class,
+        )
+        fake_boxes = mock.Mock()
+        fake_boxes.cls.tolist.return_value = [0]
+        fake_boxes.xyxy.tolist.return_value = [[10, 20, 80, 90]]
+        fake_result = mock.Mock(boxes=fake_boxes)
+        fake_model = mock.Mock()
+        fake_model.predict.return_value = [fake_result]
+
+        with mock.patch('annotate.annotate.YOLO', return_value=fake_model):
+            result = run_auto_annotation(job, config, mode=AutoAnnotateConfig.MODE_OVERRIDE)
+
+        annotation = Annotation.objects.get(image=image, project_class=existing_class)
+        self.assertEqual(result, {'images_processed': 1, 'annotations_created': 1})
+        self.assertEqual(annotation.x_min, 10)
 
     @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS)
     def test_auto_annotate_reports_progress_after_each_processed_image(self):
@@ -230,7 +344,11 @@ class AutoAnnotateQueueTests(TestCase):
             file='models/model.pt',
             classes=['Item'],
         )
-        AutoAnnotateConfig.objects.create(project=project, model=ai_model)
+        AutoAnnotateConfig.objects.create(
+            project=project,
+            model=ai_model,
+            mode=AutoAnnotateConfig.MODE_OVERRIDE,
+        )
         client = APIClient()
         client.force_authenticate(user=user)
 
@@ -240,6 +358,7 @@ class AutoAnnotateQueueTests(TestCase):
         queued_job = AutoAnnotateJob.objects.get()
         self.assertEqual(queued_job.job, job)
         self.assertEqual(queued_job.config.model, ai_model)
+        self.assertEqual(queued_job.mode, AutoAnnotateConfig.MODE_OVERRIDE)
         self.assertEqual(queued_job.status, AutoAnnotateJob.STATUS_PENDING)
         self.assertEqual(response.data['id'], queued_job.id)
 

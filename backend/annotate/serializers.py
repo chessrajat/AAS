@@ -292,7 +292,7 @@ class AutoAnnotateConfigSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AutoAnnotateConfig
-        fields = ('id', 'model', 'model_id', 'is_active', 'mappings')
+        fields = ('id', 'model', 'model_id', 'is_active', 'mode', 'mappings')
 
     def validate(self, attrs):
         project = self.context.get('project')
@@ -361,6 +361,7 @@ class AutoAnnotateJobSerializer(serializers.ModelSerializer):
             'id',
             'job',
             'config',
+            'mode',
             'status',
             'queued_at',
             'started_at',
