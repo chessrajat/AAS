@@ -1,12 +1,14 @@
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
 from django.core.files.base import ContentFile
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from .management.commands.run_training_jobs import Command
 from .models import TrainingArtifact, TrainingConfig, TrainingJob, TrainingPipeline
-from .runner import _copy_field_file, _store_artifact, run_training_job
+from .runner import _copy_field_file, _store_artifact, recover_stale_training_jobs, run_training_job
 
 
 class StorageFile:
@@ -75,8 +77,48 @@ class TrainingRunnerStorageTests(TestCase):
 
         self.assertEqual(fake_model.train.call_args.kwargs['device'], '0')
 
+    def test_recover_stale_training_jobs_marks_expired_running_jobs_failed(self):
+        pipeline = TrainingPipeline.objects.create(name='pipe')
+        config = TrainingConfig.objects.create(pipeline=pipeline, name='config')
+        stale_job = TrainingJob.objects.create(
+            pipeline=pipeline,
+            config=config,
+            status=TrainingJob.STATUS_RUNNING,
+            locked_at=timezone.now() - timedelta(minutes=10),
+        )
+        fresh_job = TrainingJob.objects.create(
+            pipeline=pipeline,
+            config=config,
+            status=TrainingJob.STATUS_RUNNING,
+            locked_at=timezone.now(),
+        )
 
-class TrainingWorkerCommandTests(SimpleTestCase):
+        recovered_count = recover_stale_training_jobs(stale_after_seconds=60)
+
+        self.assertEqual(recovered_count, 1)
+        stale_job.refresh_from_db()
+        fresh_job.refresh_from_db()
+        self.assertEqual(stale_job.status, TrainingJob.STATUS_FAILED)
+        self.assertEqual(fresh_job.status, TrainingJob.STATUS_RUNNING)
+
+    def test_recover_stale_training_jobs_marks_running_jobs_without_heartbeat_failed(self):
+        pipeline = TrainingPipeline.objects.create(name='pipe')
+        config = TrainingConfig.objects.create(pipeline=pipeline, name='config')
+        stale_job = TrainingJob.objects.create(
+            pipeline=pipeline,
+            config=config,
+            status=TrainingJob.STATUS_RUNNING,
+            locked_at=None,
+        )
+
+        recovered_count = recover_stale_training_jobs(stale_after_seconds=60)
+
+        self.assertEqual(recovered_count, 1)
+        stale_job.refresh_from_db()
+        self.assertEqual(stale_job.status, TrainingJob.STATUS_FAILED)
+
+
+class TrainingWorkerCommandTests(TestCase):
     def test_worker_runs_auto_annotate_before_training(self):
         command = Command()
         options = {
@@ -96,6 +138,9 @@ class TrainingWorkerCommandTests(SimpleTestCase):
                 'train.management.commands.run_training_jobs.claim_next_training_job',
             ) as claim_training,
             mock.patch(
+                'train.management.commands.run_training_jobs.run_next_export_job',
+            ) as run_export,
+            mock.patch(
                 'train.management.commands.run_training_jobs.TrainingJob.objects.filter',
             ) as training_filter,
         ):
@@ -104,6 +149,40 @@ class TrainingWorkerCommandTests(SimpleTestCase):
             command.handle(**options)
 
         run_auto.assert_called_once_with(worker_id='worker-1')
+        run_export.assert_not_called()
+        claim_training.assert_not_called()
+
+    def test_worker_runs_export_before_training(self):
+        command = Command()
+        options = {
+            'limit': 1,
+            'job_id': None,
+            'worker_id': 'worker-1',
+            'loop': False,
+            'poll_interval': 0,
+        }
+
+        with (
+            mock.patch(
+                'train.management.commands.run_training_jobs.run_next_auto_annotate_job',
+                return_value=False,
+            ),
+            mock.patch(
+                'train.management.commands.run_training_jobs.run_next_export_job',
+                return_value=True,
+            ) as run_export,
+            mock.patch(
+                'train.management.commands.run_training_jobs.claim_next_training_job',
+            ) as claim_training,
+            mock.patch(
+                'train.management.commands.run_training_jobs.TrainingJob.objects.filter',
+            ) as training_filter,
+        ):
+            training_filter.return_value.count.return_value = 0
+
+            command.handle(**options)
+
+        run_export.assert_called_once_with(worker_id='worker-1')
         claim_training.assert_not_called()
 
     def test_worker_continues_when_auto_annotate_job_fails(self):
@@ -124,6 +203,10 @@ class TrainingWorkerCommandTests(SimpleTestCase):
             mock.patch(
                 'train.management.commands.run_training_jobs.claim_next_training_job',
                 return_value=None,
+            ),
+            mock.patch(
+                'train.management.commands.run_training_jobs.run_next_export_job',
+                return_value=False,
             ),
             mock.patch(
                 'train.management.commands.run_training_jobs.TrainingJob.objects.filter',
@@ -149,6 +232,7 @@ class TrainingWorkerCommandTests(SimpleTestCase):
                 return_value=False,
             ),
             mock.patch('train.management.commands.run_training_jobs.claim_next_training_job') as claim,
+            mock.patch('train.management.commands.run_training_jobs.run_next_export_job', return_value=False),
             mock.patch('train.management.commands.run_training_jobs.run_training_job'),
             mock.patch('train.management.commands.run_training_jobs.TrainingJob.objects.filter') as training_filter,
             mock.patch('train.management.commands.run_training_jobs.time.sleep') as sleep,

@@ -57,7 +57,8 @@ export default function ProjectAnnotatePage() {
     deleteAnnotation,
     createProjectClass,
     exportProject,
-    exportJob,
+    createJobExport,
+    fetchJobExport,
     deleteProjectClass,
     deleteImage,
     fetchAutoAnnotateConfigs,
@@ -106,6 +107,7 @@ export default function ProjectAnnotatePage() {
   const [isMappingDialogOpen, setIsMappingDialogOpen] = useState(false);
   const [hasAutoAnnotateConfig, setHasAutoAnnotateConfig] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState("");
+  const [autoAnnotateRunModelId, setAutoAnnotateRunModelId] = useState("");
   const [autoAnnotateMode, setAutoAnnotateMode] = useState("skip");
   const [classMappings, setClassMappings] = useState({});
   const [autoAnnotateConfigs, setAutoAnnotateConfigs] = useState([]);
@@ -296,8 +298,17 @@ export default function ProjectAnnotatePage() {
         return;
       }
       if (result.ok) {
-        setHasAutoAnnotateConfig((result.data || []).length > 0);
-        setAutoAnnotateConfigs(result.data || []);
+        const configs = result.data || [];
+        setHasAutoAnnotateConfig(configs.length > 0);
+        setAutoAnnotateConfigs(configs);
+        setAutoAnnotateRunModelId((currentModelId) => {
+          const configuredModelIds = configs
+            .map((config) => String(config.model?.id || ""))
+            .filter(Boolean);
+          return configuredModelIds.includes(currentModelId)
+            ? currentModelId
+            : configuredModelIds[0] || "";
+        });
       }
     };
     loadConfigs();
@@ -372,6 +383,7 @@ export default function ProjectAnnotatePage() {
       : [result.data, ...autoAnnotateConfigs];
     setAutoAnnotateConfigs(updatedConfigs);
     setHasAutoAnnotateConfig(updatedConfigs.length > 0);
+    setAutoAnnotateRunModelId(selectedModelId);
     setIsMappingDialogOpen(false);
     toast.success("Auto-annotate configuration saved.");
   };
@@ -383,7 +395,10 @@ export default function ProjectAnnotatePage() {
     }
     setIsAutoAnnotating(true);
     setAutoAnnotateJobStatus(null);
-    const result = await runJobAutoAnnotate(activeJobId);
+    const result = await runJobAutoAnnotate(
+      activeJobId,
+      autoAnnotateRunModelId ? { model_id: Number(autoAnnotateRunModelId) } : {},
+    );
     if (!result.ok) {
       setIsAutoAnnotating(false);
       toast.error("Auto-annotate failed", {
@@ -1081,7 +1096,7 @@ export default function ProjectAnnotatePage() {
     }
     setIsExporting(true);
     setExportProgress(0);
-    const result = await exportJob(activeJobId, setExportProgress);
+    const result = await createJobExport(activeJobId);
     if (!result.ok) {
       toast.error("Export failed", {
         description: result.error || "Please try again.",
@@ -1090,14 +1105,35 @@ export default function ProjectAnnotatePage() {
       return;
     }
 
-    const blobUrl = window.URL.createObjectURL(result.data);
+    let statusData = result.data;
+    while (statusData?.status === "pending" || statusData?.status === "running") {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const statusResult = await fetchJobExport(activeJobId, statusData.id);
+      if (!statusResult.ok) {
+        toast.error("Export failed", {
+          description: statusResult.error || "Unable to load export status.",
+        });
+        setIsExporting(false);
+        return;
+      }
+      statusData = statusResult.data;
+      setExportProgress(Math.round(statusData?.progress_percent || 0));
+    }
+
+    if (statusData?.status !== "completed" || !statusData?.file_url) {
+      toast.error("Export failed", {
+        description: statusData?.error_message || "The export did not complete.",
+      });
+      setIsExporting(false);
+      return;
+    }
+
     const link = document.createElement("a");
-    link.href = blobUrl;
+    link.href = statusData.file_url;
     link.download = `job-${activeJobId}-yolov8.zip`;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    window.URL.revokeObjectURL(blobUrl);
     setIsExporting(false);
   };
 
@@ -1687,9 +1723,25 @@ export default function ProjectAnnotatePage() {
             <Button variant="outline" onClick={handleUploadClick} disabled={isUploading || !activeJobId}>
               {isUploading ? "Uploading..." : "Upload images"}
             </Button>
+            <NativeSelect
+              value={autoAnnotateRunModelId}
+              onChange={(event) => setAutoAnnotateRunModelId(event.target.value)}
+              disabled={!activeJobId || isAutoAnnotating || autoAnnotateConfigs.length === 0}
+              className="h-9 w-44"
+            >
+              {autoAnnotateConfigs.length === 0 ? (
+                <NativeSelectOption value="">No auto model</NativeSelectOption>
+              ) : (
+                autoAnnotateConfigs.map((config) => (
+                  <NativeSelectOption key={config.id} value={String(config.model?.id || "")}>
+                    {config.model?.name || `Model #${config.model}`}
+                  </NativeSelectOption>
+                ))
+              )}
+            </NativeSelect>
             <Button
               variant="secondary"
-              disabled={!activeJobId || !hasAutoAnnotateConfig || isAutoAnnotating}
+              disabled={!activeJobId || !hasAutoAnnotateConfig || !autoAnnotateRunModelId || isAutoAnnotating}
               onClick={handleRunAutoAnnotate}
             >
               {autoAnnotateButtonLabel}

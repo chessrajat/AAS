@@ -19,6 +19,7 @@ from .models import (
     AIModel,
     Annotation,
     AutoAnnotateJob,
+    ExportJob,
     Image,
     Job,
     Project,
@@ -30,6 +31,7 @@ from .serializers import (
     AnnotationSerializer,
     AutoAnnotateConfigSerializer,
     AutoAnnotateJobSerializer,
+    ExportJobSerializer,
     ImageSerializer,
     JobSerializer,
     ProjectClassSerializer,
@@ -331,6 +333,8 @@ class JobViewSet(viewsets.ModelViewSet):
         'images:GET': ALL_PROJECT_ROLES,
         'images:POST': {'owner', 'manager'},
         'export_job': {'owner', 'manager'},
+        'create_export_job': {'owner', 'manager'},
+        'export_job_status': ALL_PROJECT_ROLES,
         'auto_annotate_run': {'owner', 'manager'},
         'auto_annotate_job_status': ALL_PROJECT_ROLES,
     }
@@ -401,6 +405,33 @@ class JobViewSet(viewsets.ModelViewSet):
             .order_by('id')
         )
         return build_yolo_export(job.project, images, f'job-{job.id}')
+
+    @action(detail=True, methods=['post'], url_path='exports')
+    def create_export_job(self, request, pk=None):
+        job = self.get_object()
+        export_job = ExportJob.objects.create(
+            job=job,
+            total_images=job.images.count(),
+        )
+        return Response(
+            ExportJobSerializer(export_job, context={'request': request}).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path=r'exports/(?P<export_job_id>[^/.]+)',
+    )
+    def export_job_status(self, request, pk=None, export_job_id=None):
+        job = self.get_object()
+        export_job = job.export_jobs.filter(id=export_job_id).first()
+        if not export_job:
+            return Response(
+                {'detail': 'Export job not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(ExportJobSerializer(export_job, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='auto-annotate/run')
     def auto_annotate_run(self, request, pk=None):

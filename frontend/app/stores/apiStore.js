@@ -411,6 +411,36 @@ export const useApiStore = create((set) => ({
       return { ok: false, error: message };
     }
   },
+  createJobExport: async (jobId) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing job id" };
+    }
+    try {
+      const response = await apiClient.post(`/api/annotate/jobs/${jobId}/exports/`, {});
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to queue job export");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  fetchJobExport: async (jobId, exportJobId) => {
+    set({ error: null });
+    if (!jobId || !exportJobId) {
+      return { ok: false, error: "Missing export job id" };
+    }
+    try {
+      const response = await apiClient.get(
+        `/api/annotate/jobs/${jobId}/exports/${exportJobId}/`,
+      );
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to load job export status");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
   fetchAnnotations: async (imageId) => {
     set({ error: null });
     if (!imageId) {
@@ -896,6 +926,48 @@ export const useApiStore = create((set) => ({
       return { ok: true, data: response.data };
     } catch (error) {
       const message = getApiErrorMessage(error, "Unable to load training jobs");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  cancelTrainingJob: async (jobId) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing training job id" };
+    }
+    try {
+      const response = await apiClient.post(`/api/train/jobs/${jobId}/cancel/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to cancel training job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  restartTrainingJob: async (jobId) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing training job id" };
+    }
+    try {
+      const response = await apiClient.post(`/api/train/jobs/${jobId}/restart/`);
+      return { ok: true, data: response.data };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to restart training job");
+      set({ error: message });
+      return { ok: false, error: message };
+    }
+  },
+  deleteTrainingJob: async (jobId) => {
+    set({ error: null });
+    if (!jobId) {
+      return { ok: false, error: "Missing training job id" };
+    }
+    try {
+      await apiClient.delete(`/api/train/jobs/${jobId}/`);
+      return { ok: true };
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Unable to delete training job");
       set({ error: message });
       return { ok: false, error: message };
     }

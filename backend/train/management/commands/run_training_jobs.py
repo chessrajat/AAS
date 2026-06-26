@@ -3,13 +3,18 @@ from django.core.management.base import BaseCommand, CommandError
 import socket
 import time
 
-from annotate.runner import run_next_auto_annotate_job
+from annotate.runner import (
+    recover_stale_auto_annotate_jobs,
+    recover_stale_export_jobs,
+    run_next_auto_annotate_job,
+    run_next_export_job,
+)
 from train.models import TrainingJob
-from train.runner import claim_next_training_job, run_training_job
+from train.runner import claim_next_training_job, recover_stale_training_jobs, run_training_job
 
 
 class Command(BaseCommand):
-    help = 'Run pending auto-annotate and YOLO training jobs from the queue.'
+    help = 'Run pending export, auto-annotate, and YOLO training jobs from the queue.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -72,6 +77,9 @@ class Command(BaseCommand):
                 break
 
     def _run_batch(self, limit, worker_id, job_id):
+        recover_stale_auto_annotate_jobs()
+        recover_stale_export_jobs()
+        recover_stale_training_jobs()
         ran_count = 0
         for _ in range(limit):
             try:
@@ -83,6 +91,18 @@ class Command(BaseCommand):
 
             if ran_auto_annotate_job:
                 self.stdout.write(self.style.SUCCESS('Auto-annotate job completed.'))
+                ran_count += 1
+                continue
+
+            try:
+                ran_export_job = run_next_export_job(worker_id=worker_id)
+            except Exception as exc:
+                self.stderr.write(self.style.ERROR(f'Export job failed: {exc}'))
+                ran_count += 1
+                continue
+
+            if ran_export_job:
+                self.stdout.write(self.style.SUCCESS('Export job completed.'))
                 ran_count += 1
                 continue
 

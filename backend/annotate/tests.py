@@ -15,6 +15,7 @@ from .models import (
     AutoAnnotateJob,
     AutoAnnotateClassMapping,
     AutoAnnotateConfig,
+    ExportJob,
     Image,
     Job,
     Project,
@@ -22,6 +23,7 @@ from .models import (
 )
 from .serializers import ImageSerializer
 from .views import build_yolo_export
+from .runner import run_export_job
 
 User = get_user_model()
 
@@ -362,6 +364,44 @@ class AutoAnnotateQueueTests(TestCase):
         self.assertEqual(queued_job.status, AutoAnnotateJob.STATUS_PENDING)
         self.assertEqual(response.data['id'], queued_job.id)
 
+    def test_auto_annotate_run_enqueues_requested_model_config(self):
+        user = User.objects.create_superuser(
+            username='model-admin',
+            email='model-admin@example.com',
+            password='password',
+        )
+        project = Project.objects.create(name='Project')
+        job = Job.objects.create(project=project, name='Job')
+        first_model = AIModel.objects.create(
+            name='First model',
+            file='models/first.pt',
+            classes=['First'],
+        )
+        second_model = AIModel.objects.create(
+            name='Second model',
+            file='models/second.pt',
+            classes=['Second'],
+        )
+        AutoAnnotateConfig.objects.create(project=project, model=first_model)
+        second_config = AutoAnnotateConfig.objects.create(
+            project=project,
+            model=second_model,
+            mode=AutoAnnotateConfig.MODE_SKIP,
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        response = client.post(
+            f'/api/annotate/jobs/{job.id}/auto-annotate/run/',
+            {'model_id': second_model.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 202)
+        queued_job = AutoAnnotateJob.objects.get()
+        self.assertEqual(queued_job.config, second_config)
+        self.assertEqual(queued_job.mode, AutoAnnotateConfig.MODE_SKIP)
+
     def test_auto_annotate_job_status_endpoint_returns_progress(self):
         user = User.objects.create_superuser(
             username='status-admin',
@@ -395,6 +435,67 @@ class AutoAnnotateQueueTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['id'], auto_job.id)
         self.assertEqual(response.data['status'], AutoAnnotateJob.STATUS_RUNNING)
+
+
+class ExportQueueTests(TestCase):
+    def test_job_export_endpoint_enqueues_export_job(self):
+        user = User.objects.create_superuser(
+            username='export-admin',
+            email='export-admin@example.com',
+            password='password',
+        )
+        project = Project.objects.create(name='Project')
+        job = Job.objects.create(project=project, name='Job')
+        Image.objects.create(
+            job=job,
+            file='projects/1/jobs/1/images/image.jpg',
+            width=100,
+            height=100,
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        response = client.post(f'/api/annotate/jobs/{job.id}/exports/', {})
+
+        self.assertEqual(response.status_code, 202)
+        export_job = ExportJob.objects.get()
+        self.assertEqual(export_job.job, job)
+        self.assertEqual(export_job.status, ExportJob.STATUS_PENDING)
+        self.assertEqual(export_job.total_images, 1)
+
+    @override_settings(STORAGES=REMOTE_STORAGE_SETTINGS)
+    def test_export_worker_saves_zip_to_storage(self):
+        NoPathMemoryStorage.files = {
+            'projects/1/jobs/1/images/image.jpg': b'image-content',
+        }
+        project = Project.objects.create(name='Project')
+        job = Job.objects.create(project=project, name='Job')
+        project_class = ProjectClass.objects.create(project=project, name='Item', index=0)
+        image = Image.objects.create(
+            job=job,
+            file='projects/1/jobs/1/images/image.jpg',
+            width=100,
+            height=100,
+        )
+        Annotation.objects.create(
+            image=image,
+            project_class=project_class,
+            x_min=10,
+            y_min=20,
+            x_max=80,
+            y_max=90,
+        )
+        export_job = ExportJob.objects.create(job=job, total_images=1)
+
+        run_export_job(export_job)
+
+        export_job.refresh_from_db()
+        self.assertEqual(export_job.status, ExportJob.STATUS_COMPLETED)
+        self.assertEqual(export_job.progress_percent, 100)
+        self.assertTrue(export_job.file.name)
+        archive = zipfile.ZipFile(BytesIO(NoPathMemoryStorage.files[export_job.file.name]))
+        self.assertEqual(archive.read('images/image.jpg'), b'image-content')
+        self.assertIn('labels/image.txt', archive.namelist())
         self.assertEqual(response.data['processed_images'], 4)
         self.assertEqual(response.data['total_images'], 10)
         self.assertEqual(response.data['annotations_created'], 7)

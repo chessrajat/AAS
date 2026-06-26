@@ -847,7 +847,11 @@ class TrainingDatasetItemViewSet(mixins.DestroyModelMixin, viewsets.GenericViewS
     }
 
 
-class TrainingJobViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+class TrainingJobViewSet(
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
     queryset = (
         TrainingJob.objects.select_related('pipeline', 'config', 'dataset')
         .prefetch_related('artifacts')
@@ -857,9 +861,54 @@ class TrainingJobViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated, HasAnnotateRolePermission]
     role_permissions = {
         'retrieve': ALL_PROJECT_ROLES,
+        'destroy': MANAGE_TRAINING_ROLES,
+        'cancel': MANAGE_TRAINING_ROLES,
+        'restart': MANAGE_TRAINING_ROLES,
         'artifacts': ALL_PROJECT_ROLES,
         'download_artifacts_zip': ALL_PROJECT_ROLES,
     }
+
+    def destroy(self, request, *args, **kwargs):
+        job = self.get_object()
+        if job.status == TrainingJob.STATUS_RUNNING:
+            return Response(
+                {'detail': 'Cancel the running training job before deleting it.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        job = self.get_object()
+        if job.status not in {TrainingJob.STATUS_PENDING, TrainingJob.STATUS_RUNNING}:
+            return Response(
+                {'detail': 'Only pending or running training jobs can be cancelled.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        job.status = TrainingJob.STATUS_CANCELLED
+        job.finished_at = timezone.now()
+        job.error_message = 'Cancelled by user.'
+        job.save(update_fields=['status', 'finished_at', 'error_message'])
+        return Response(TrainingJobSerializer(job, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def restart(self, request, pk=None):
+        job = self.get_object()
+        if job.status in {TrainingJob.STATUS_PENDING, TrainingJob.STATUS_RUNNING}:
+            return Response(
+                {'detail': 'Only completed, failed, or cancelled training jobs can be restarted.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        restarted_job = TrainingJob.objects.create(
+            pipeline=job.pipeline,
+            config=job.config,
+            dataset=job.dataset,
+            total_epochs=job.total_epochs,
+        )
+        return Response(
+            TrainingJobSerializer(restarted_job, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=['get'], url_path='artifacts')
     def artifacts(self, request, pk=None):

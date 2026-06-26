@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Database, Download, ListChecks, Play, Plus, RefreshCw, Save, Settings2, Tags, Trash2 } from "lucide-react";
+import { Database, Download, ListChecks, Play, Plus, RefreshCw, RotateCcw, Save, Settings2, Tags, Trash2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import HomeSidebar from "../../components/HomeSidebar";
@@ -38,16 +38,21 @@ const DEFAULT_TRAINING_ARGS = {
   amp: true,
 };
 
+const CANCELLABLE_TRAINING_STATUSES = new Set(["pending", "running"]);
+const RESTARTABLE_TRAINING_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
 const boolToText = (value) => (value ? "true" : "false");
 
 export default function TrainingPage() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const {
     applyTrainingSplit,
+    cancelTrainingJob,
     createTrainingConfig,
     createTrainingClass,
     createTrainingJob,
     createTrainingPipeline,
+    deleteTrainingJob,
     deleteTrainingClass,
     fetchModels,
     fetchTrainingDatasets,
@@ -62,6 +67,7 @@ export default function TrainingPage() {
     models,
     trainingDatasets,
     trainingPipelines,
+    restartTrainingJob,
     updateTrainingClass,
     updateTrainingConfig,
   } = useApiStore();
@@ -97,6 +103,7 @@ export default function TrainingPage() {
   const [isQueueingJob, setIsQueueingJob] = useState(false);
   const [selectedArtifactByJob, setSelectedArtifactByJob] = useState({});
   const [downloadingArtifactKey, setDownloadingArtifactKey] = useState("");
+  const [trainingJobActionKey, setTrainingJobActionKey] = useState("");
 
   const splitTotal = Number(trainPercent) + Number(valPercent) + Number(testPercent);
   const latestJob = jobs[0];
@@ -418,6 +425,52 @@ export default function TrainingPage() {
       result.data,
       getDownloadFilename(result.headers, `training-job-${job.id}-artifacts.zip`),
     );
+  };
+
+  const replaceTrainingJob = (updatedJob) => {
+    setJobs((prev) => prev.map((job) => (job.id === updatedJob.id ? updatedJob : job)));
+  };
+
+  const handleCancelTrainingJob = async (job) => {
+    setTrainingJobActionKey(`cancel-${job.id}`);
+    const result = await cancelTrainingJob(job.id);
+    setTrainingJobActionKey("");
+    if (!result.ok) {
+      toast.error("Cancel failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    replaceTrainingJob(result.data);
+    toast.success(`Training job #${job.id} cancelled.`);
+  };
+
+  const handleRestartTrainingJob = async (job) => {
+    setTrainingJobActionKey(`restart-${job.id}`);
+    const result = await restartTrainingJob(job.id);
+    setTrainingJobActionKey("");
+    if (!result.ok) {
+      toast.error("Restart failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    setJobs((prev) => [result.data, ...prev]);
+    toast.success(`Training job #${result.data.id} queued.`);
+  };
+
+  const handleDeleteTrainingJob = async (job) => {
+    setTrainingJobActionKey(`delete-${job.id}`);
+    const result = await deleteTrainingJob(job.id);
+    setTrainingJobActionKey("");
+    if (!result.ok) {
+      toast.error("Delete failed", {
+        description: result.error || "Please try again.",
+      });
+      return;
+    }
+    setJobs((prev) => prev.filter((item) => item.id !== job.id));
+    toast.success(`Training job #${job.id} deleted.`);
   };
 
   const handleSaveConfig = async () => {
@@ -989,7 +1042,7 @@ export default function TrainingPage() {
                   ) : (
                     <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
                       {jobs.map((job) => (
-                        <div key={job.id} className="grid gap-3 border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 lg:grid-cols-[70px_1fr_110px_100px_260px_220px] lg:items-center">
+                        <div key={job.id} className="grid gap-3 border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 lg:grid-cols-[70px_1fr_110px_100px_260px_380px] lg:items-center">
                           <span className="font-medium text-slate-900">#{job.id}</span>
                           <span className="text-slate-600">{job.config_detail?.name || "Config"}</span>
                           <Badge variant="secondary">{job.status}</Badge>
@@ -1035,6 +1088,39 @@ export default function TrainingPage() {
                             >
                               <Download className="h-4 w-4" />
                               ZIP
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleCancelTrainingJob(job)}
+                              disabled={
+                                !CANCELLABLE_TRAINING_STATUSES.has(job.status) ||
+                                trainingJobActionKey === `cancel-${job.id}`
+                              }
+                            >
+                              <XCircle className="h-4 w-4" />
+                              Cancel
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRestartTrainingJob(job)}
+                              disabled={
+                                !RESTARTABLE_TRAINING_STATUSES.has(job.status) ||
+                                trainingJobActionKey === `restart-${job.id}`
+                              }
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              Restart
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteTrainingJob(job)}
+                              disabled={job.status === "running" || trainingJobActionKey === `delete-${job.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete
                             </Button>
                           </div>
                         </div>

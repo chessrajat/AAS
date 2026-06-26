@@ -147,6 +147,10 @@ def project_image_upload_to(instance, filename):
     return f"projects/{instance.job.project_id}/jobs/{instance.job_id}/images/{name}"
 
 
+def export_file_upload_to(instance, filename):
+    return f"exports/jobs/{instance.job_id}/{filename}"
+
+
 class Image(models.Model):
     STATUS_NEW = 'new'
     STATUS_IN_PROGRESS = 'in_progress'
@@ -279,3 +283,55 @@ class AutoAnnotateJob(models.Model):
 
     def __str__(self) -> str:
         return f'{self.job}: {self.status}'
+
+
+class ExportJob(models.Model):
+    STATUS_PENDING = 'pending'
+    STATUS_RUNNING = 'running'
+    STATUS_COMPLETED = 'completed'
+    STATUS_FAILED = 'failed'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_RUNNING, 'Running'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    ]
+
+    EXPORT_TYPE_YOLO = 'yolo'
+    EXPORT_TYPE_CHOICES = [
+        (EXPORT_TYPE_YOLO, 'YOLO'),
+    ]
+
+    job = models.ForeignKey(
+        Job,
+        related_name='export_jobs',
+        on_delete=models.CASCADE,
+    )
+    export_type = models.CharField(
+        max_length=20,
+        choices=EXPORT_TYPE_CHOICES,
+        default=EXPORT_TYPE_YOLO,
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    queued_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    total_images = models.PositiveIntegerField(default=0)
+    processed_images = models.PositiveIntegerField(default=0)
+    progress_percent = models.FloatField(default=0)
+    file = models.FileField(upload_to=export_file_upload_to, blank=True)
+    worker_id = models.CharField(max_length=100, blank=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', 'queued_at']),
+            models.Index(fields=['worker_id', 'locked_at']),
+        ]
+        ordering = ['-queued_at']
+
+    def __str__(self) -> str:
+        return f'{self.job}: {self.export_type}: {self.status}'

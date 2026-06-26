@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronRight, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Download, MoreHorizontal, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -12,6 +12,12 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -22,7 +28,9 @@ export default function ProjectJobsPage() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const {
     createProjectJob,
+    createJobExport,
     deleteJob,
+    fetchJobExport,
     fetchProject,
     fetchProjectJobs,
     updateJob,
@@ -38,6 +46,8 @@ export default function ProjectJobsPage() {
   const [editJobName, setEditJobName] = useState("");
   const [editJobDescription, setEditJobDescription] = useState("");
   const [jobToDelete, setJobToDelete] = useState(null);
+  const [exportingJobId, setExportingJobId] = useState(null);
+  const [exportProgressByJobId, setExportProgressByJobId] = useState({});
 
   useEffect(() => {
     if (!accessToken) {
@@ -158,6 +168,80 @@ export default function ProjectJobsPage() {
     setJobToDelete(null);
   };
 
+  const handleExportJob = async (job) => {
+    if (!job?.id) {
+      return;
+    }
+    setExportingJobId(job.id);
+    setExportProgressByJobId((prev) => ({ ...prev, [job.id]: 0 }));
+    const result = await createJobExport(job.id);
+    if (!result.ok) {
+      toast.error("Job export failed", {
+        description: result.error || "Please try again.",
+      });
+      setExportingJobId(null);
+      setExportProgressByJobId((prev) => {
+        const next = { ...prev };
+        delete next[job.id];
+        return next;
+      });
+      return;
+    }
+
+    toast.success("Export queued", {
+      description: "The worker will prepare the ZIP shortly.",
+    });
+
+    let statusData = result.data;
+    while (statusData?.status === "pending" || statusData?.status === "running") {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const statusResult = await fetchJobExport(job.id, statusData.id);
+      if (!statusResult.ok) {
+        toast.error("Job export failed", {
+          description: statusResult.error || "Unable to load export status.",
+        });
+        setExportingJobId(null);
+        setExportProgressByJobId((prev) => {
+          const next = { ...prev };
+          delete next[job.id];
+          return next;
+        });
+        return;
+      }
+      statusData = statusResult.data;
+      setExportProgressByJobId((prev) => ({
+        ...prev,
+        [job.id]: Math.round(statusData?.progress_percent || 0),
+      }));
+    }
+
+    if (statusData?.status !== "completed" || !statusData?.file_url) {
+      toast.error("Job export failed", {
+        description: statusData?.error_message || "The export did not complete.",
+      });
+      setExportingJobId(null);
+      setExportProgressByJobId((prev) => {
+        const next = { ...prev };
+        delete next[job.id];
+        return next;
+      });
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = statusData.file_url;
+    link.download = `job-${job.id}-yolov8.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setExportingJobId(null);
+    setExportProgressByJobId((prev) => {
+      const next = { ...prev };
+      delete next[job.id];
+      return next;
+    });
+  };
+
   if (!accessToken) {
     return null;
   }
@@ -218,7 +302,7 @@ export default function ProjectJobsPage() {
           </Card>
 
           <div className="overflow-hidden rounded-sm border border-border bg-card">
-            <div className="grid grid-cols-[1fr_1fr_110px_170px] bg-muted px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="grid grid-cols-[1fr_1fr_110px_150px] bg-muted px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
               <span>Name</span>
               <span>Description</span>
               <span>Images</span>
@@ -234,7 +318,7 @@ export default function ProjectJobsPage() {
               jobs.map((job) => (
                 <div
                   key={job.id}
-                  className="grid grid-cols-[1fr_1fr_110px_170px] items-center border-t border-border px-4 py-3 text-sm"
+                  className="grid grid-cols-[1fr_1fr_110px_150px] items-center border-t border-border px-4 py-3 text-sm"
                 >
                   <span className="font-medium text-slate-900">{job.name}</span>
                   <span className="truncate text-slate-500">
@@ -250,23 +334,35 @@ export default function ProjectJobsPage() {
                       <Play className="h-4 w-4" />
                       Open
                     </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label="Edit job"
-                      onClick={() => handleOpenEditJob(job)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label="Delete job"
-                      className="text-red-500 hover:text-red-600"
-                      onClick={() => setJobToDelete(job)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="icon" variant="ghost" aria-label="Job actions">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuItem
+                          disabled={exportingJobId === job.id}
+                          onClick={() => handleExportJob(job)}
+                        >
+                          <Download className="h-4 w-4" />
+                          {exportingJobId === job.id
+                            ? `Exporting ${exportProgressByJobId[job.id] || 0}%`
+                            : "Export job"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleOpenEditJob(job)}>
+                          <Pencil className="h-4 w-4" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-red-500 focus:text-red-600"
+                          onClick={() => setJobToDelete(job)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               ))

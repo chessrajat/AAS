@@ -7,7 +7,9 @@ import random
 from django.core.files import File
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
+from datetime import timedelta
 from ultralytics import YOLO
 
 from annotate.models import AIModel
@@ -95,6 +97,20 @@ def claim_next_training_job(worker_id=None, job_id=None):
             'error_message',
         ])
         return job
+
+
+def recover_stale_training_jobs(stale_after_seconds=None):
+    stale_after_seconds = stale_after_seconds or settings.JOB_STALE_AFTER_SECONDS
+    cutoff = timezone.now() - timedelta(seconds=stale_after_seconds)
+    return TrainingJob.objects.filter(
+        status=TrainingJob.STATUS_RUNNING,
+    ).filter(
+        Q(locked_at__lt=cutoff) | Q(locked_at__isnull=True),
+    ).update(
+        status=TrainingJob.STATUS_FAILED,
+        finished_at=timezone.now(),
+        error_message='Worker heartbeat expired before completing this training job.',
+    )
 
 
 def _write_data_yaml(job, dataset_dir):
@@ -237,7 +253,8 @@ def _save_epoch_metrics(job, trainer):
     job.current_epoch = epoch
     job.total_epochs = total_epochs
     job.progress_percent = (epoch / total_epochs * 100) if total_epochs else 0
-    job.save(update_fields=['current_epoch', 'total_epochs', 'progress_percent'])
+    job.locked_at = timezone.now()
+    job.save(update_fields=['current_epoch', 'total_epochs', 'progress_percent', 'locked_at'])
 
 
 def _store_artifact(job, artifact_type, source_path):
@@ -294,6 +311,11 @@ def run_training_job(job):
         model = YOLO(_resolve_base_model(job.config.base_model, work_dir))
         model.add_callback('on_fit_epoch_end', lambda trainer: _save_epoch_metrics(job, trainer))
         result = model.train(**final_args)
+        job.refresh_from_db(fields=['status'])
+        if job.status in {TrainingJob.STATUS_CANCELLED, TrainingJob.STATUS_FAILED}:
+            job.finished_at = timezone.now()
+            job.save(update_fields=['finished_at'])
+            return job
         trainer = getattr(model, 'trainer', None)
         save_dir = getattr(trainer, 'save_dir', None) or getattr(result, 'save_dir', None)
         if save_dir:
@@ -313,6 +335,11 @@ def run_training_job(job):
         ])
         return job
     except Exception as exc:
+        job.refresh_from_db(fields=['status'])
+        if job.status == TrainingJob.STATUS_CANCELLED:
+            job.finished_at = timezone.now()
+            job.save(update_fields=['finished_at'])
+            return job
         job.status = TrainingJob.STATUS_FAILED
         job.finished_at = timezone.now()
         job.error_message = str(exc)

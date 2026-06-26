@@ -13,6 +13,7 @@ from .models import (
     AutoAnnotateClassMapping,
     AutoAnnotateConfig,
     AutoAnnotateJob,
+    ExportJob,
     Image,
     Job,
     Project,
@@ -375,6 +376,37 @@ class AutoAnnotateJobSerializer(serializers.ModelSerializer):
             'error_message',
         )
         read_only_fields = fields
+
+
+class ExportJobSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ExportJob
+        fields = (
+            'id',
+            'job',
+            'export_type',
+            'status',
+            'queued_at',
+            'started_at',
+            'finished_at',
+            'total_images',
+            'processed_images',
+            'progress_percent',
+            'file',
+            'file_url',
+            'worker_id',
+            'locked_at',
+            'error_message',
+        )
+        read_only_fields = fields
+
+    def get_file_url(self, obj):
+        request = self.context.get('request')
+        if not obj.file:
+            return None
+        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
 
 
 class ImageSerializer(serializers.ModelSerializer):
