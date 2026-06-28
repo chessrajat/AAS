@@ -26,17 +26,29 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   minio-init:
     image: minio/mc:latest
     depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 aasminio aasminio123; do sleep 2; done &&
-      mc mb -p local/aas-media || true &&
-      mc anonymous set download local/aas-media
-      "
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        if ! mc alias set local http://minio:9000 aasminio aasminio123; then
+          echo "Unable to connect to MinIO with the configured root credentials."
+          echo "If this is an existing Docker volume, remove it with: docker compose down -v"
+          exit 1
+        fi
+        mc mb -p local/aas-media || true
+        mc anonymous set download local/aas-media
 
   migrate:
     build:
